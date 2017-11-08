@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-def bottleneck_module(input, train):
+def bottleneck(input, train):
     '''Bottleneck module for residual networks with BN before convolution.
 
     Args:
