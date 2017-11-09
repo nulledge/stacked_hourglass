@@ -5,3 +5,4 @@ module_path = os.path.join(script_path, 'module')
 sys.path.append(module_path)
 
 from bottleneck import *
+from hourglass import *
