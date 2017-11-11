@@ -17,19 +17,17 @@ def hourglass(input, train):
 
         scope = lambda name: 'depth_' + str(depth) + '/' + name
 
-        net = bottleneck(input = input, train = train, name = scope('conv'))
-        skip = bottleneck(input = net, train = train, name = scope('skip'))
-        net = tf.nn.max_pool(value = net, name = scope('pool'),
-            ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = 'SAME')
+        skip = bottleneck(input = input, train = train, name = scope('skip'))
+        net = layer.pool(input = input, name = scope('pool'))
+        net = bottleneck(input = net, train = train, name = scope('conv_downscale'))
 
         if depth == 0:
-            net = bottleneck(input = net, train = train, name = scope('mini_conv_00'))
-            net = bottleneck(input = net, train = train, name = scope('mini_conv_01'))
-            net = bottleneck(input = net, train = train, name = scope('mini_conv_02'))
+            net = bottleneck(input = net, train = train, name = scope('conv_center'))
         else:
-            net = _hourglass_internal(input = net,
-                train = train, depth = depth - 1)
+            net = _hourglass_internal(input = net, train = train, depth = depth - 1)
 
+        net = bottleneck(input = net, train = train, name = scope('conv_upscale'))
+        
         height, width = map(lambda i: i.value*2, net.get_shape()[-3:-1])
         net = tf.image.resize_images(
             images = net,

@@ -8,35 +8,39 @@ import layer
 
 import tensorflow as tf
 
-def bottleneck(input, train, name = 'bottleneck'):
+def bottleneck(input, train, kchannel = None, name = 'bottleneck'):
     '''Bottleneck module for residual networks with BN before convolution.
 
     Args:
-        input: An input tensor in NHWC. The number of channel must be 256.
+        input: An input tensor in NHWC.
         train: The flag for batch normalization.
         name: The name of variable scope.
+        kchannel: The number of filter channels. If None then same as input.
 
     Returns:
         The output tensor of the module.
     '''
-    assert input.get_shape()[-1] == 256
-
     with tf.variable_scope(name):
 
-        skip = tf.identity(input)
+        if kchannel == None:
+            skip = tf.identity(input)
+            kchannel = input.get_shape()[-1].value
+        else:
+            skip = layer.conv(input = input, ksize = 1, kchannel = kchannel)
 
-        net = tf.contrib.layers.batch_norm(inputs = input, is_training = train)
         with tf.variable_scope('conv_00'):
-            net = layer.conv(tensor = net, ksize = 1, kchannel = 128)
-            net = tf.contrib.layers.batch_norm(inputs = net, is_training = train)
-            net = tf.nn.relu(net)
+            net = layer.bn(input = input, train = train)
+            net = layer.relu(input = net)
+            net = layer.conv(input = net, ksize = 1, kchannel = kchannel/2)
 
         with tf.variable_scope('conv_01'):
-            net = layer.conv(tensor = net, ksize = 3, kchannel = 128)
-            net = tf.contrib.layers.batch_norm(inputs = net, is_training = train)
-            net = tf.nn.relu(net)
+            net = layer.bn(input = net, train = train)
+            net = layer.relu(input = net)
+            net = layer.conv(input = net, ksize = 3, kchannel = kchannel/2)
 
         with tf.variable_scope('conv_02'):
-            net = layer.conv(tensor = net, ksize = 1, kchannel = 256)
+            net = layer.bn(input = net, train = train)
+            net = layer.relu(input = net)
+            net = layer.conv(input = net, ksize = 1, kchannel = kchannel)
 
-        return tf.nn.relu(net + skip, name = 'output')
+        return layer.relu(net + skip, name = 'output')
