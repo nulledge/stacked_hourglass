@@ -27,20 +27,20 @@ def bottleneck(input, train, kchannel = None, name = 'bottleneck'):
             kchannel = input.get_shape()[-1].value
         else:
             skip = layer.conv(input = input, ksize = 1, kchannel = kchannel)
-
-        with tf.variable_scope('conv_00'):
             net = layer.bn(input = input, train = train)
             net = layer.relu(input = net)
+
+        with tf.variable_scope('conv_00'):
             net = layer.conv(input = net, ksize = 1, kchannel = kchannel/2)
+            net = layer.bn(input = net, train = train)
+            net = layer.relu(input = net)
 
         with tf.variable_scope('conv_01'):
+            net = layer.conv(input = net, ksize = 3, kchannel = kchannel/2)
             net = layer.bn(input = net, train = train)
             net = layer.relu(input = net)
-            net = layer.conv(input = net, ksize = 3, kchannel = kchannel/2)
 
         with tf.variable_scope('conv_02'):
-            net = layer.bn(input = net, train = train)
-            net = layer.relu(input = net)
             net = layer.conv(input = net, ksize = 1, kchannel = kchannel)
 
         return layer.relu(net + skip, name = 'output')
