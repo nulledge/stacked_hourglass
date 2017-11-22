@@ -25,6 +25,7 @@ def bottleneck(input, train, kchannel = None, name = 'bottleneck'):
         if kchannel == None:
             skip = tf.identity(input)
             kchannel = input.get_shape()[-1].value
+            net = tf.identity(input)
         else:
             skip = layer.conv(input = input, ksize = 1, kchannel = kchannel)
             net = layer.bn(input = input, train = train)
