@@ -1,0 +1,26 @@
+{
+    "project": "hourglass",
+    "pretrained": {
+        "path": "~/Workspace/pretrained/",
+        "load": true,
+        "save": true
+    },
+    "log": {
+        "path": "~/Workspace/log/",
+        "save": true
+    },
+    "data": {
+        "path": "~/Workspace/data/",
+        "name": "FLIC"
+    },
+    "task": {
+        "step": "train",
+        "train": {
+            "epoch": 100
+        },
+        "eval": {
+            "metric": "PCK",
+            "coefficient": 0.5
+        }
+    }
+}
