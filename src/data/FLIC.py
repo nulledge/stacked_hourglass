@@ -39,7 +39,7 @@ class FLIC(DataInterface):
     Args:
         root: The root path to FLIC data.
         task: 'train' or 'eval'.
-        metric: 'PCK' only.
+        metric: 'PCK' or 'PCKt' only.
     '''
     def __init__(self, root, task, metric):
         self.__extract_path = os.path.join(root, 'FLIC')
