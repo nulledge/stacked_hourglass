@@ -245,7 +245,7 @@ class FLIC(DataInterface):
                 scale = 64 / length
                 heatmaps[:, :, joint.value] = generateHeatmap(64, 1,
                       [vertical[FLIC.JOINT_TO_INDEX[joint]] * scale,
-                      (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + int(length)//2) * scale])
+                      (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length//2) * scale])
         return heatmaps
     
     

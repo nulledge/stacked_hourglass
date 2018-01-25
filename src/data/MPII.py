@@ -154,11 +154,15 @@ class MPII(DataInterface):
         for index in range(len(batch_index)):
             batch_heat[index][:, :, :] = self.__getHeat(batch_index[index])
             
+        batch_pose = np.ndarray(shape = (len(batch_index), len(JOINT), 2), dtype = np.float32)
+        for index in range(len(batch_index)):
+            batch_pose[index][:, :] = self.__getPosition(batch_index[index])
+            
         batch_threshold = []
         for index in range(len(batch_index)):
             batch_threshold.append(self.__getThreshold(batch_index[index]))
             
-        return batch_rgb, batch_heat, batch_threshold, MPII.__getMasking()
+        return batch_rgb, batch_heat, batch_pose, batch_threshold, MPII.__getMasking()
     
     
     ''' Set to read data from initial.
@@ -188,6 +192,21 @@ class MPII(DataInterface):
         return batch_index
     
     
+    ''' Get image path.
+    
+    Arg:
+        index: Data index.
+    
+    Return:
+        Path to image.
+    '''
+    @lru_cache(maxsize = 32)
+    def __getImagePath(self, index):
+        img_idx, r_idx = index
+        
+        image_name = self.__annotation['annolist'][0, 0][0, img_idx]['image'][0, 0]['name'][0]
+        return os.path.join(self.__extract_path['image'], image_name)
+    
     ''' Calculate padding.
     
     Arg:
@@ -197,13 +216,12 @@ class MPII(DataInterface):
         Image path, original center, bounding box length, padding size.
     '''
     @lru_cache(maxsize = 32)
-    def __padImage(self, index):
+    def __getPadding(self, index):
         img_idx, r_idx = index
         
-        image_name = self.__annotation['annolist'][0, 0][0, img_idx]['image'][0, 0]['name'][0]
-        image_path = os.path.join(self.__extract_path['image'], image_name)
-        image_res = {}
-        image_res['vertical'], image_res['horizontal'] = Image.open(image_path).size
+        path = self.__getImagePath(index)
+        resolution = {}
+        resolution['vertical'], resolution['horizontal'] = Image.open(path).size
         
         center = {
             'vertical': int(self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['objpos'][0, 0]['y'][0, 0]),
@@ -211,20 +229,25 @@ class MPII(DataInterface):
         }
         length = int(self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['scale'][0, 0] * 200)
         
-        pad = {}
-        pad['vertical'] = {'up':0, 'down':0}
-        pad['horizontal'] = {'left':0, 'right':0}
+        pad = {
+            'horizontal': {
+                'left': 0, 'right': 0
+            },
+            'vertical': {
+                'up': 0, 'down': 0
+            }
+        }
         
         if center['vertical'] - length//2 < 0:
             pad['vertical']['up'] = length//2 - center['vertical']
-        if center['vertical'] + length//2 >= image_res['vertical']:
-            pad['vertical']['down'] = center['vertical'] + length//2 - image_res['vertical']
+        if center['vertical'] + length//2 >= resolution['vertical']:
+            pad['vertical']['down'] = center['vertical'] + length//2 - resolution['vertical']
         if center['horizontal'] - length//2 < 0:
             pad['horizontal']['left'] = length//2 - center['horizontal']
-        if center['horizontal'] + length//2 >= image_res['horizontal']:
-            pad['horizontal']['right'] = center['horizontal'] + length//2 - image_res['horizontal']
+        if center['horizontal'] + length//2 >= resolution['horizontal']:
+            pad['horizontal']['right'] = center['horizontal'] + length//2 - resolution['horizontal']
         
-        return image_path, center, length, pad
+        return center, length, pad
     
     
     ''' Get RGB image.
@@ -236,23 +259,9 @@ class MPII(DataInterface):
         RGB image of 256*256 px.
     '''
     def __getRGB(self, index):
-        image_path, center, length, pad = self.__padImage(index)
-        
-        return scipy.misc.imresize(
-            np.pad(
-                imageio.imread(image_path),
-                (
-                    (pad['vertical']['up'], pad['vertical']['down']),
-                    (pad['horizontal']['left'], pad['horizontal']['right']),
-                    (0, 0)),
-                'constant', constant_values = (0, 0)
-            )[center['vertical'] + pad['vertical']['up'] - length//2
-                  :center['vertical'] + pad['vertical']['down'] + length//2,
-              center['horizontal'] + pad['horizontal']['left'] - length//2
-                  :center['horizontal'] + pad['horizontal']['right'] + length//2,
-              :],
-            (256, 256)
-        )
+        center, length, pad = self.__getPadding(index)
+        path = self.__getImagePath(index)
+        return cropRGB(path, center, length, pad)
     
     
     ''' Get Heatmap images.
@@ -265,7 +274,7 @@ class MPII(DataInterface):
     '''
     def __getHeat(self, index):
         heatmaps = np.ndarray(shape = (64, 64, len(JOINT)))
-        _, center, length, pad = self.__padImage(index)
+        center, length, pad = self.__getPadding(index)
         img_idx, r_idx = index
         
         keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0]['point']
@@ -289,15 +298,53 @@ class MPII(DataInterface):
 
                 scale = 64 / length
                 heatmaps[:, :, joint.value] = generateHeatmap(64, 1,
-                      [(int(keypoints_ref[0, joint_idx]['y'][0, 0]) 
+                      [(keypoints_ref[0, joint_idx]['y'][0, 0]
                           + length//2
                           - center['vertical']) * scale,
-                      (int(keypoints_ref[0, joint_idx]['x'][0, 0])
+                      (keypoints_ref[0, joint_idx]['x'][0, 0]
                         + length//2
                         - center['horizontal']) * scale])
-                    
         return heatmaps
     
+    
+    ''' Get joint positions.
+    
+    Arg:
+        index: Data index.
+        
+    Return:
+        Positions for all joints.
+    '''
+    def __getPosition(self, index):
+        pose = np.ndarray(shape = (len(JOINT), 2))
+        center, length, pad = self.__getPadding(index)
+        
+        img_idx, r_idx = index
+        
+        keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0]['point']
+        
+        for joint in JOINT:
+            if joint not in MPII.JOINT_TO_INDEX:
+                continue
+            n_joint = keypoints_ref.shape[1]
+            for joint_idx in range(n_joint):
+                try:
+                    visible = not (not keypoints_ref[0, joint_idx]['is_visible']
+                        or keypoints_ref[0, joint_idx]['is_visible'] == '0'
+                        or keypoints_ref[0, joint_idx]['is_visible'] == 0)
+                except:
+                    visible = True
+                tag = keypoints_ref[0, joint_idx]['id'][0, 0]
+
+                if MPII.JOINT_TO_INDEX[joint] != tag or visible == False:
+                    continue
+
+                scale = 64 / length
+                pose[joint.value, :] = [
+                    (keypoints_ref[0, joint_idx]['y'][0, 0] + length//2 - center['vertical']) * scale,
+                    (keypoints_ref[0, joint_idx]['x'][0, 0] + length//2 - center['horizontal']) * scale]
+        return pose
+        
     
     ''' Calculate PCKh threshold.
     
@@ -308,7 +355,7 @@ class MPII(DataInterface):
         PCKh threshold
     '''
     def __getThresholdPCKh(self, index):
-        _, _, length, _ = self.__padImage(index)
+        _, length, _ = self.__getPadding(index)
         img_idx, r_idx = index
         human_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
         
