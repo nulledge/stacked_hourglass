@@ -109,9 +109,10 @@ class FLIC(DataInterface):
         size: Batch size.
     
     Returns:
-        Tuple of RGB images, heatmaps, metric threshold and masks.
+        Tuple of RGB images, heatmaps, position, metric threshold and masks.
         RGB images are shape of (size, 256, 256, 3).
         Heatmaps are shape of (size, 64, 64, joint).
+        Positions are shape of (size, joint, 2).
         Metric threshold is a single value.
         Masks are shape of (joint).
     '''
@@ -127,11 +128,15 @@ class FLIC(DataInterface):
         for index in range(len(batch_index)):
             batch_heat[index][:, :, :] = self.__getHeat(batch_index[index])
             
+        batch_pose = np.ndarray(shape = (len(batch_index), len(JOINT), 2), dtype = np.float32)
+        for index in range(len(batch_index)):
+            batch_pose[index][:, :] = self.__getPosition(batch_index[index])
+            
         batch_threshold = []
         for index in range(len(batch_index)):
             batch_threshold.append(self.__getThreshold(batch_index[index]))
             
-        return batch_rgb, batch_heat, batch_threshold, FLIC.__getMasking()
+        return batch_rgb, batch_heat, batch_pose, batch_threshold, FLIC.__getMasking()
     
     
     ''' Set to read data from initial.
@@ -166,31 +171,39 @@ class FLIC(DataInterface):
         index: Data index.
         
     Returns:
-        Padded center, original resolution, original torso position, padding size.
+        Center position, length of bounding box and padding to each side.
     '''
     @lru_cache(maxsize = 32)
-    def __padImage(self, index):
+    def __getPadding(self, index):
         torso = {}
         torso['left'], torso['up'], torso['right'], torso['down'] = FLIC.__squeeze(self.__annotation, ['torsobox', index])
-        torso['left'] = int(torso['left'])
-        torso['up'] = int(torso['up'])
-        torso['right'] = int(torso['right'])
-        torso['down'] = int(torso['down'])
-        
-        center = {}
-        center['horizontal'] = (torso['right'] + torso['left']) // 2
+        torso = dict([(key, int(value)) for key, value in torso.items()])
         
         resolution = {}
         resolution['vertical'], resolution['horizontal'], _ = FLIC.__squeeze(self.__annotation, ['imgdims', index])
         
-        pad = {'left': 0, 'right': 0}
-        if center['horizontal'] + resolution['vertical']//2 > resolution['horizontal']:
-            pad['right'] = center['horizontal'] + resolution['vertical']//2 - resolution['horizontal']
-        if center['horizontal'] - resolution['vertical']//2 < 0:
-            pad['left'] = resolution['vertical']//2 - center['horizontal']
-            center['horizontal'] += pad['left']
+        center = {
+            'horizontal': (torso['right'] + torso['left']) // 2,
+            'vertical': resolution['vertical'] // 2
+        }
         
-        return center, resolution, torso, pad
+        pad = {
+            'horizontal': {
+                'left': 0, 'right': 0
+            },
+            'vertical': {
+                'up': 0, 'down': 0
+            }
+        }
+        
+        length = resolution['vertical']
+        
+        if center['horizontal'] - length//2 < 0:
+            pad['horizontal']['left'] = length//2 - center['horizontal']
+        if center['horizontal'] + length//2 >= resolution['horizontal']:
+            pad['horizontal']['right'] = center['horizontal'] + length//2 - resolution['horizontal']
+        
+        return center, length, pad
         
         
     ''' Get RGB image.
@@ -202,25 +215,13 @@ class FLIC(DataInterface):
         RGB image of 256*256 px.
     '''
     def __getRGB(self, index):
-        center, resolution, _, pad = self.__padImage(index)
-        return scipy.misc.imresize(
-            np.pad(
-                imageio.imread(
-                    os.path.join(
-                        self.__extract_path,
-                        'images',
-                        FLIC.__squeeze(self.__annotation, ['filepath', index]).item()
-                    )
-                ),
-                (
-                    (0, 0),
-                    (pad['left'], pad['right']),
-                    (0, 0)
-                ),
-                'constant', constant_values = (0, 0)
-            )[:, center['horizontal'] - resolution['vertical']//2:center['horizontal'] + resolution['vertical']//2, :],
-            (256, 256)
+        center, length, pad = self.__getPadding(index)
+        image_path = os.path.join(
+            self.__extract_path,
+            'images',
+            FLIC.__squeeze(self.__annotation, ['filepath', index]).item()
         )
+        return cropRGB(image_path, center, length, pad)
     
     
     ''' Get Heatmap images.
@@ -233,7 +234,7 @@ class FLIC(DataInterface):
     '''
     def __getHeat(self, index):
         heatmaps = np.ndarray(shape = (64, 64, len(JOINT)), dtype = np.float32)
-        center, resolution, _, pad = self.__padImage(index)
+        center, length, _ = self.__getPadding(index)
         
         horizontal, vertical = FLIC.__squeeze(self.__annotation, [index, 'coords'])
         
@@ -241,12 +242,35 @@ class FLIC(DataInterface):
             if joint not in FLIC.JOINT_TO_INDEX:
                 heatmaps[:, :, joint.value] = 0
             else:
-                scale = 64 / resolution['vertical']
+                scale = 64 / length
                 heatmaps[:, :, joint.value] = generateHeatmap(64, 1,
                       [vertical[FLIC.JOINT_TO_INDEX[joint]] * scale,
-                      (horizontal[FLIC.JOINT_TO_INDEX[joint]] + pad['left']
-                       - center['horizontal'] + resolution['vertical']//2) * scale])
+                      (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + int(length)//2) * scale])
         return heatmaps
+    
+    
+    ''' Get joint positions.
+    
+    Arg:
+        index: Data index.
+        
+    Return:
+        Positions for all joints.
+    '''
+    def __getPosition(self, index):
+        pose = np.ndarray(shape = (len(JOINT), 2))
+        center, length, pad = self.__getPadding(index)
+        
+        horizontal, vertical = FLIC.__squeeze(self.__annotation, [index, 'coords'])
+        
+        for joint in JOINT:
+            if joint not in FLIC.JOINT_TO_INDEX:
+                continue
+            else:
+                scale = 64 / length
+                pose[joint.value, :] = [vertical[FLIC.JOINT_TO_INDEX[joint]] * scale,
+                    (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length//2) * scale]
+        return pose
     
     
     ''' Calculate PCK threshold.

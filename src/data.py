@@ -100,7 +100,42 @@ class JOINT(Enum):
     M_Thorax    =   30
     M_UpperNeck =   31
     M_HeadTop   =   32
+
     
+''' Crop RGB image
+
+Args:
+    image_path: Path to the RGB image.
+    center: Center of the bounding box.
+    length: Width and height of the bounding box.
+    pad: Padding size to each sides.
+
+Returns:
+    
+'''
+def cropRGB(image_path, center, length, pad):
+    image = imageio.imread(image_path)
+    image = np.pad(
+        image,
+        (
+            (pad['vertical']['up'], pad['vertical']['down']),
+            (pad['horizontal']['left'], pad['horizontal']['right']),
+            (0, 0)
+        ),
+        'constant', constant_values = (0, 0)
+    )
+    image = image[
+        center['vertical'] + pad['vertical']['up'] - length//2
+            : center['vertical'] + pad['vertical']['up'] + length//2,
+        center['horizontal'] + pad['horizontal']['left'] - length//2
+            : center['horizontal'] + pad['horizontal']['left'] + length//2,
+        0:3
+    ]
+    image = scipy.misc.imresize(image, (256, 256))
+    
+    return image
+
+
 ''' Generate heatmap with Gaussian distribution.
 
 Args:
@@ -122,7 +157,8 @@ def generateHeatmap(size, sigma = 1, center = None):
         y0 = center[0]
 
     return 255/sigma*np.exp(-((x-x0)**2 + (y-y0)**2) / 2*sigma**2)
-              
+
+
 import sys
 script_path = os.path.split(os.path.realpath(__file__))[0]
 implementation_path = os.path.join(script_path, 'data')
