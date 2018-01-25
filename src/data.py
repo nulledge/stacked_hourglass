@@ -101,7 +101,65 @@ class JOINT(Enum):
     M_UpperNeck =   31
     M_HeadTop   =   32
 
+
+''' Data augmentation.
+'''
+class AUGMENTATION:
+    class ROTATE(Enum):
+        NO_CHANGE = 0
+        CW_30_DEGREES = 1
+        CCW_30_DEGREES = 2
     
+    class SCALE(Enum):
+        NO_CHANGE = 0
+        UP_25_PERCENTAGE = 1
+        DOWN_25_PERCENTAGE = 2
+
+
+def rotatePosition(pose, rotate, scale):    
+    if rotate is not AUGMENTATION.ROTATE.NO_CHANGE.value:
+        if rotate == AUGMENTATION.ROTATE.CW_30_DEGREES.value:
+            degree = 30 
+        elif rotate == AUGMENTATION.ROTATE.CCW_30_DEGREES.value:
+            degree = -30
+
+        pose_in_crop_space = {
+            'vertical': pose['vertical'] - 64//2,
+            'horizontal': pose['horizontal'] - 64//2
+        }
+        rotated_in_crop_space = {
+            'vertical': math.cos(degree * math.pi / 180) * pose_in_crop_space['vertical']\
+                - math.sin(degree * math.pi / 180) * pose_in_crop_space['horizontal'],
+            'horizontal': math.sin(degree * math.pi / 180) * pose_in_crop_space['vertical']\
+                + math.cos(degree * math.pi / 180) * pose_in_crop_space['horizontal']
+        }
+        pose = {
+            'vertical': rotated_in_crop_space['vertical'] + 64//2,
+            'horizontal': rotated_in_crop_space['horizontal'] + 64//2
+        }
+
+    if scale is not AUGMENTATION.SCALE.NO_CHANGE.value:
+        if scale == AUGMENTATION.SCALE.UP_25_PERCENTAGE.value:
+            coefficient = 1.25
+        elif scale == AUGMENTATION.SCALE.DOWN_25_PERCENTAGE.value:
+            coefficient = 0.75
+
+        pose_in_crop_space = {
+            'vertical': pose['vertical'] - 64//2,
+            'horizontal': pose['horizontal'] - 64//2
+        }
+        scaled_in_crop_space = {
+            'vertical': pose_in_crop_space['vertical'] * coefficient,
+            'horizontal': pose_in_crop_space['horizontal'] * coefficient
+        }
+        pose = {
+            'vertical': scaled_in_crop_space['vertical'] + 64//2,
+            'horizontal': scaled_in_crop_space['horizontal'] + 64//2
+        }
+    
+    return pose
+
+
 ''' Crop RGB image
 
 Args:

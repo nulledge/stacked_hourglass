@@ -5,6 +5,7 @@ sys.path.append(interface_path)
 
 from data import *
 from functools import lru_cache
+import math
 
 ''' FLIC data reader
 
@@ -18,6 +19,7 @@ Attribs:
 class FLIC(DataInterface):
     
     NUMBER_OF_DATA = 5003
+    NUMBER_OF_AUGMENTED_DATA = NUMBER_OF_DATA * 9
     TRAIN_RATIO = 0.9
     JOINT_TO_INDEX = {
         JOINT.L_Shoulder: 0,
@@ -89,16 +91,29 @@ class FLIC(DataInterface):
     The task set files are ${root}/train.txt and ${root}/eval.txt.
     '''
     def __refreshTaskSet(self, path):
-        indices = [i for i in range(FLIC.NUMBER_OF_DATA)]
+        indices = [
+            (index, rotate.value, scale.value)
+            for index in range(FLIC.NUMBER_OF_DATA)
+            for rotate in AUGMENTATION.ROTATE
+            for scale in AUGMENTATION.SCALE
+        ]
         random.shuffle(indices)
 
         with open(os.path.join(path, 'train.txt'), 'w') as train_set:
-            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA)):
-                train_set.write(str(indices[i]) + '\n')
+            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_AUGMENTED_DATA)):
+                train_set.write(
+                    str(indices[i][0]) + ' '
+                    + str(indices[i][1]) + ' '
+                    + str(indices[i][2])
+                    + '\n')
 
         with open(os.path.join(path, 'eval.txt'), 'w') as eval_set:
-            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA), FLIC.NUMBER_OF_DATA):
-                eval_set.write(str(indices[i]) + '\n')
+            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA), FLIC.NUMBER_OF_AUGMENTED_DATA):
+                eval_set.write(
+                    str(indices[i][0]) + ' '
+                    + str(indices[i][1]) + ' '
+                    + str(indices[i][2])
+                    + '\n')
     
     
     ''' Read data with the number of specific size.
@@ -161,7 +176,8 @@ class FLIC(DataInterface):
             index = self.__taskSet.readline()
             if index == '':
                 break
-            batch_index.append(int(index))
+            index, rotate, scale = index.split(' ')
+            batch_index.append((int(index), int(rotate), int(scale)))
         return batch_index
     
     
@@ -215,13 +231,43 @@ class FLIC(DataInterface):
         RGB image of 256*256 px.
     '''
     def __getRGB(self, index):
+        index, rotate, scale = index
         center, length, pad = self.__getPadding(index)
         image_path = os.path.join(
             self.__extract_path,
             'images',
             FLIC.__squeeze(self.__annotation, ['filepath', index]).item()
         )
-        return cropRGB(image_path, center, length, pad)
+        image = cropRGB(image_path, center, length, pad)
+        
+        if rotate == AUGMENTATION.ROTATE.CW_30_DEGREES.value:
+            image = scipy.misc.imrotate(image, 30)
+        elif rotate == AUGMENTATION.ROTATE.CCW_30_DEGREES.value:
+            image = scipy.misc.imrotate(image, -30)
+
+        if scale == AUGMENTATION.SCALE.UP_25_PERCENTAGE.value:
+            new_length = int(256 * 1.25)
+            new_center = int(256//2 * 1.25)
+            image = scipy.misc.imresize(image, (new_length, new_length))
+            image = image[
+                new_center - 256//2 : new_center + 256//2,
+                new_center - 256//2 : new_center + 256//2,
+                0:3
+            ]
+        elif scale == AUGMENTATION.SCALE.DOWN_25_PERCENTAGE.value:
+            new_length = int(256 * 0.75)
+            image = scipy.misc.imresize(image, (new_length, new_length))
+            image = np.pad(
+                image,
+                (
+                    (int(256 * 0.25/2), int(256 * 0.25/2)),
+                    (int(256 * 0.25/2), int(256 * 0.25/2)),
+                    (0, 0)
+                ),
+                'constant', constant_values = (0, 0)
+            )
+        
+        return image
     
     
     ''' Get Heatmap images.
@@ -233,6 +279,7 @@ class FLIC(DataInterface):
         Heatmap images of 64*64 px for all joints.
     '''
     def __getHeat(self, index):
+        index, rotate, scale = index
         heatmaps = np.ndarray(shape = (64, 64, len(JOINT)), dtype = np.float32)
         center, length, _ = self.__getPadding(index)
         
@@ -242,10 +289,18 @@ class FLIC(DataInterface):
             if joint not in FLIC.JOINT_TO_INDEX:
                 heatmaps[:, :, joint.value] = 0
             else:
-                scale = 64 / length
-                heatmaps[:, :, joint.value] = generateHeatmap(64, 1,
-                      [vertical[FLIC.JOINT_TO_INDEX[joint]] * scale,
-                      (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length//2) * scale])
+                resize = 64 / length
+                pose = {
+                    'vertical': vertical[FLIC.JOINT_TO_INDEX[joint]] * resize,
+                    'horizontal': (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length//2) * resize
+                }
+                pose = rotatePosition(
+                    pose,
+                    rotate = rotate,
+                    scale = scale
+                )
+                
+                heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
         return heatmaps
     
     
@@ -258,7 +313,8 @@ class FLIC(DataInterface):
         Positions for all joints.
     '''
     def __getPosition(self, index):
-        pose = np.ndarray(shape = (len(JOINT), 2))
+        index, rotate, scale = index
+        position = np.ndarray(shape = (len(JOINT), 2))
         center, length, pad = self.__getPadding(index)
         
         horizontal, vertical = FLIC.__squeeze(self.__annotation, [index, 'coords'])
@@ -267,10 +323,20 @@ class FLIC(DataInterface):
             if joint not in FLIC.JOINT_TO_INDEX:
                 continue
             else:
-                scale = 64 / length
-                pose[joint.value, :] = [vertical[FLIC.JOINT_TO_INDEX[joint]] * scale,
-                    (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length//2) * scale]
-        return pose
+                resize = 64 / length
+                pose = {
+                    'vertical': vertical[FLIC.JOINT_TO_INDEX[joint]] * resize,
+                    'horizontal': (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length//2) * resize
+                }
+                pose = rotatePosition(
+                    pose,
+                    rotate = rotate,
+                    scale = scale
+                )
+                    
+                position[joint.value, :] = [pose['vertical'], pose['horizontal']]
+                
+        return position
     
     
     ''' Calculate PCK threshold.
