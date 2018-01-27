@@ -116,7 +116,49 @@ class AUGMENTATION:
         DOWN_25_PERCENTAGE = 2
 
 
-def rotatePosition(pose, rotate, scale):    
+''' Transform the image.
+
+Transform the image following the augmentation rules.
+
+Args:
+    image: Image with the shape of (256, 256, 3).
+    rotate: One of AUGMENTATION.ROTATE.
+    scale: One of AUGMENTATION.SCALE.
+
+Return:
+    Rotated and Scaled image with the shape of (256, 256, 3).
+'''
+def transformImage(image, rotate, scale):
+    if rotate == AUGMENTATION.ROTATE.CW_30_DEGREES.value:
+        image = scipy.misc.imrotate(image, 30)
+    elif rotate == AUGMENTATION.ROTATE.CCW_30_DEGREES.value:
+        image = scipy.misc.imrotate(image, -30)
+
+    if scale == AUGMENTATION.SCALE.UP_25_PERCENTAGE.value:
+        new_length = int(256 * 1.25)
+        new_center = int(256//2 * 1.25)
+        image = scipy.misc.imresize(image, (new_length, new_length))
+        image = image[
+            new_center - 256//2 : new_center + 256//2,
+            new_center - 256//2 : new_center + 256//2,
+            0:3
+        ]
+    elif scale == AUGMENTATION.SCALE.DOWN_25_PERCENTAGE.value:
+        new_length = int(256 * 0.75)
+        image = scipy.misc.imresize(image, (new_length, new_length))
+        image = np.pad(
+            image,
+            (
+                (int(256 * 0.25/2), int(256 * 0.25/2)),
+                (int(256 * 0.25/2), int(256 * 0.25/2)),
+                (0, 0)
+            ),
+            'constant', constant_values = (0, 0)
+        )
+    return image
+
+
+def transformPosition(pose, rotate, scale):    
     if rotate is not AUGMENTATION.ROTATE.NO_CHANGE.value:
         if rotate == AUGMENTATION.ROTATE.CW_30_DEGREES.value:
             degree = 30 

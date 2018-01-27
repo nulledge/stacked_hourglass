@@ -19,7 +19,6 @@ Attribs:
 class FLIC(DataInterface):
     
     NUMBER_OF_DATA = 5003
-    NUMBER_OF_AUGMENTED_DATA = NUMBER_OF_DATA * 9
     TRAIN_RATIO = 0.9
     JOINT_TO_INDEX = {
         JOINT.L_Shoulder: 0,
@@ -106,7 +105,10 @@ class FLIC(DataInterface):
 
         with open(os.path.join(path, 'eval.txt'), 'w') as eval_set:
             for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA), FLIC.NUMBER_OF_AUGMENTED_DATA):
-                eval_set.write(str(indices[i]) + ' 0 0\n')
+                eval_set.write(
+                    str(indices[i]) + ' '
+                    + str(AUGMENTATION.ROTATE.NO_CHANGE.value) + ' '
+                    + str(AUGMENTATION.SCALE.NO_CHANGE.value) + '\n')
     
     
     ''' Read data with the number of specific size.
@@ -232,33 +234,7 @@ class FLIC(DataInterface):
             FLIC.__squeeze(self.__annotation, ['filepath', index]).item()
         )
         image = cropRGB(image_path, center, length, pad)
-        
-        if rotate == AUGMENTATION.ROTATE.CW_30_DEGREES.value:
-            image = scipy.misc.imrotate(image, 30)
-        elif rotate == AUGMENTATION.ROTATE.CCW_30_DEGREES.value:
-            image = scipy.misc.imrotate(image, -30)
-
-        if scale == AUGMENTATION.SCALE.UP_25_PERCENTAGE.value:
-            new_length = int(256 * 1.25)
-            new_center = int(256//2 * 1.25)
-            image = scipy.misc.imresize(image, (new_length, new_length))
-            image = image[
-                new_center - 256//2 : new_center + 256//2,
-                new_center - 256//2 : new_center + 256//2,
-                0:3
-            ]
-        elif scale == AUGMENTATION.SCALE.DOWN_25_PERCENTAGE.value:
-            new_length = int(256 * 0.75)
-            image = scipy.misc.imresize(image, (new_length, new_length))
-            image = np.pad(
-                image,
-                (
-                    (int(256 * 0.25/2), int(256 * 0.25/2)),
-                    (int(256 * 0.25/2), int(256 * 0.25/2)),
-                    (0, 0)
-                ),
-                'constant', constant_values = (0, 0)
-            )
+        image= transformImage(image, rotate, scale)
         
         return image
     
@@ -287,7 +263,7 @@ class FLIC(DataInterface):
                     'vertical': vertical[FLIC.JOINT_TO_INDEX[joint]] * resize,
                     'horizontal': (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length//2) * resize
                 }
-                pose = rotatePosition(
+                pose = transformPosition(
                     pose,
                     rotate = rotate,
                     scale = scale

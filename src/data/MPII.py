@@ -117,15 +117,26 @@ class MPII(DataInterface):
                           self.__annotation['annolist'][0, 0][0, img_idx]['image'][0, 0]['name'][0])
 
         MPII.NUMBER_OF_DATA = len(indices)
+        
         random.shuffle(indices)
         
         with open(os.path.join(path, 'train.txt'), 'w') as train_set:
             for i in range(int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA)):
-                train_set.write(str(indices[i][0]) + " " + str(indices[i][1]) + '\n')
+                for rotate in AUGMENTATION.ROTATE:
+                    for scale in AUGMENTATION.SCALE:
+                        train_set.write(
+                            str(indices[i][0]) + ' '
+                            + str(indices[i][1]) + ' '
+                            + str(rotate.value) + ' '
+                            + str(scale.value) + '\n')
                 
         with open(os.path.join(path, 'eval.txt'), 'w') as eval_set:
             for i in range(int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA), MPII.NUMBER_OF_DATA):
-                eval_set.write(str(indices[i][0]) + " " + str(indices[i][1]) + '\n')
+                eval_set.write(
+                    str(indices[i][0]) + ' '
+                    + str(indices[i][1]) + ' '
+                    + str(AUGMENTATION.ROTATE.NO_CHANGE.value) + ' '
+                    + str(AUGMENTATION.SCALE.NO_CHANGE.value) + '\n')
 
 
     ''' Read data with the number of specific size.
@@ -187,8 +198,8 @@ class MPII(DataInterface):
             index = self.__taskSet.readline()
             if index == '':
                 break
-            img_idx, r_idx = index.split(' ')
-            batch_index.append((int(img_idx), int(r_idx)))
+            img_idx, r_idx, rotate, scale = index.split(' ')
+            batch_index.append((int(img_idx), int(r_idx), int(rotate), int(scale)))
         return batch_index
     
     
@@ -202,7 +213,7 @@ class MPII(DataInterface):
     '''
     @lru_cache(maxsize = 32)
     def __getImagePath(self, index):
-        img_idx, r_idx = index
+        img_idx, r_idx, _, _ = index
         
         image_name = self.__annotation['annolist'][0, 0][0, img_idx]['image'][0, 0]['name'][0]
         return os.path.join(self.__extract_path['image'], image_name)
@@ -217,7 +228,7 @@ class MPII(DataInterface):
     '''
     @lru_cache(maxsize = 32)
     def __getPadding(self, index):
-        img_idx, r_idx = index
+        img_idx, r_idx, _, _ = index
         
         path = self.__getImagePath(index)
         resolution = {}
@@ -261,7 +272,10 @@ class MPII(DataInterface):
     def __getRGB(self, index):
         center, length, pad = self.__getPadding(index)
         path = self.__getImagePath(index)
-        return cropRGB(path, center, length, pad)
+        _, _, rotate, scale = index
+        image = cropRGB(path, center, length, pad)
+        image = transformImage(image, rotate, scale)
+        return image
     
     
     ''' Get Heatmap images.
@@ -275,7 +289,7 @@ class MPII(DataInterface):
     def __getHeat(self, index):
         heatmaps = np.ndarray(shape = (64, 64, len(JOINT)))
         center, length, pad = self.__getPadding(index)
-        img_idx, r_idx = index
+        img_idx, r_idx, rotate, scale = index
         
         keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0]['point']
         
@@ -296,14 +310,13 @@ class MPII(DataInterface):
                 if MPII.JOINT_TO_INDEX[joint] != tag or visible == False:
                     continue
 
-                scale = 64 / length
-                heatmaps[:, :, joint.value] = generateHeatmap(64, 1,
-                      [(keypoints_ref[0, joint_idx]['y'][0, 0]
-                          + length//2
-                          - center['vertical']) * scale,
-                      (keypoints_ref[0, joint_idx]['x'][0, 0]
-                        + length//2
-                        - center['horizontal']) * scale])
+                resize = 64 / length
+                pose = {
+                    'vertical': (keypoints_ref[0, joint_idx]['y'][0, 0] + length//2 - center['vertical']) * resize,
+                    'horizontal': (keypoints_ref[0, joint_idx]['x'][0, 0] + length//2 - center['horizontal']) * resize
+                }
+                pose = transformPosition(pose, rotate, scale)
+                heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
         return heatmaps
     
     
@@ -316,10 +329,10 @@ class MPII(DataInterface):
         Positions for all joints.
     '''
     def __getPosition(self, index):
-        pose = np.ndarray(shape = (len(JOINT), 2))
+        position = np.ndarray(shape = (len(JOINT), 2))
         center, length, pad = self.__getPadding(index)
         
-        img_idx, r_idx = index
+        img_idx, r_idx, rotate, scale = index
         
         keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0]['point']
         
@@ -338,12 +351,17 @@ class MPII(DataInterface):
 
                 if MPII.JOINT_TO_INDEX[joint] != tag or visible == False:
                     continue
-
-                scale = 64 / length
-                pose[joint.value, :] = [
-                    (keypoints_ref[0, joint_idx]['y'][0, 0] + length//2 - center['vertical']) * scale,
-                    (keypoints_ref[0, joint_idx]['x'][0, 0] + length//2 - center['horizontal']) * scale]
-        return pose
+                
+                resize = 64 / length
+                pose = {
+                    'vertical': (keypoints_ref[0, joint_idx]['y'][0, 0] + length//2 - center['vertical']) * resize,
+                    'horizontal': (keypoints_ref[0, joint_idx]['x'][0, 0] + length//2 - center['horizontal']) * resize
+                }
+                pose = transformPosition(pose, rotate, scale)
+                
+                position[joint.value, :] = [pose['vertical'], pose['horizontal']]
+                
+        return position
         
     
     ''' Calculate PCKh threshold.
@@ -356,7 +374,7 @@ class MPII(DataInterface):
     '''
     def __getThresholdPCKh(self, index):
         _, length, _ = self.__getPadding(index)
-        img_idx, r_idx = index
+        img_idx, r_idx, _, _ = index
         human_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
         
         return np.linalg.norm(
