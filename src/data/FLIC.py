@@ -91,29 +91,22 @@ class FLIC(DataInterface):
     The task set files are ${root}/train.txt and ${root}/eval.txt.
     '''
     def __refreshTaskSet(self, path):
-        indices = [
-            (index, rotate.value, scale.value)
-            for index in range(FLIC.NUMBER_OF_DATA)
-            for rotate in AUGMENTATION.ROTATE
-            for scale in AUGMENTATION.SCALE
-        ]
+        indices = [index for index in range(FLIC.NUMBER_OF_DATA)]
         random.shuffle(indices)
 
         with open(os.path.join(path, 'train.txt'), 'w') as train_set:
             for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_AUGMENTED_DATA)):
-                train_set.write(
-                    str(indices[i][0]) + ' '
-                    + str(indices[i][1]) + ' '
-                    + str(indices[i][2])
-                    + '\n')
+                for rotate in AUGMENTATION.ROTATE:
+                    for scale in AUGMENTATION.SCALE:
+                        train_set.write(
+                            str(indices[i]) + ' '
+                            + str(rotate.value) + ' '
+                            + str(scale.value)
+                            + '\n')
 
         with open(os.path.join(path, 'eval.txt'), 'w') as eval_set:
             for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA), FLIC.NUMBER_OF_AUGMENTED_DATA):
-                eval_set.write(
-                    str(indices[i][0]) + ' '
-                    + str(indices[i][1]) + ' '
-                    + str(indices[i][2])
-                    + '\n')
+                eval_set.write(str(indices[i]) + ' 0 0\n')
     
     
     ''' Read data with the number of specific size.
