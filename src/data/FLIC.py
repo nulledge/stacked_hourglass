@@ -94,7 +94,7 @@ class FLIC(DataInterface):
         random.shuffle(indices)
 
         with open(os.path.join(path, 'train.txt'), 'w') as train_set:
-            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_AUGMENTED_DATA)):
+            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA)):
                 for rotate in AUGMENTATION.ROTATE:
                     for scale in AUGMENTATION.SCALE:
                         train_set.write(
@@ -104,7 +104,7 @@ class FLIC(DataInterface):
                             + '\n')
 
         with open(os.path.join(path, 'eval.txt'), 'w') as eval_set:
-            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA), FLIC.NUMBER_OF_AUGMENTED_DATA):
+            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA), FLIC.NUMBER_OF_DATA):
                 eval_set.write(
                     str(indices[i]) + ' '
                     + str(AUGMENTATION.ROTATE.NO_CHANGE.value) + ' '
@@ -297,7 +297,7 @@ class FLIC(DataInterface):
                     'vertical': vertical[FLIC.JOINT_TO_INDEX[joint]] * resize,
                     'horizontal': (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length//2) * resize
                 }
-                pose = rotatePosition(
+                pose = transformPosition(
                     pose,
                     rotate = rotate,
                     scale = scale
