@@ -290,15 +290,9 @@ class FLIC:
             outlier = outlier or outlier_after_transform
             if outlier:
                 masking[joint.value] = False
-                image_path = os.path.join(
-                    self.__extract_path,
-                    'images',
-                    FLIC.__squeeze(self.__annotation, ['filepath', index]).item()
-                )
-                print(image_path)
                 continue
-
             heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
+
         return heatmaps, masking
 
     ''' Get joint positions.
