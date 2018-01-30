@@ -2,7 +2,7 @@ import scipy
 import random
 import numpy as np
 
-from src.data_impl.util import cropRGB, transformImage, transformPosition, generateHeatmap
+from .util import cropRGB, transformImage, transformPosition, generateHeatmap
 from .joint import JOINT
 from functools import lru_cache
 import os

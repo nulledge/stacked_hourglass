@@ -1,65 +1,94 @@
 import imageio
 import os
 from tqdm import tqdm
-import sys
+import tensorflow as tf
 
-sys.path.append(os.path.abspath('..'))
+from src.data import DataCenter, MPII, FLIC
+from src.data.joint import JOINT
 
-from data import DataCenter
-from data_impl.FLIC import FLIC
-from data_impl.MPII import MPII
-
-reader = DataCenter(root=os.path.expanduser('~/Workspace/data/')) \
-    .request(data='MPII', task='train', metric='PCKh')
-
-assert MPII.NUMBER_OF_DATA == 25994 + 2889
-
-batch = reader.getBatch(size=8)
-for idx in range(8):
-    imageio.imwrite('../img/image_MPII_' + str(idx) + '.jpg', batch[0][idx])
-    for y in range(64):
-        for x in range(64):
-            batch[1][idx][y, x, 0] = max(batch[1][idx][y, x, :])
-    imageio.imwrite('../img/heat_MPII_' + str(idx) + '.jpg', batch[1][idx][:, :, 0])
-'''
-
-one_epoch = int(MPII.NUMBER_OF_DATA * MPII.TRAIN_RATIO) * 2
-cnt = 0
-reader.reset()
-test_iter = tqdm(total=one_epoch)
-for _ in range(one_epoch):
-    batch = reader.getBatch(size=8)
-    cnt = cnt + batch[0].shape[0]
-    test_iter.update(batch[0].shape[0])
-test_iter.close()
-
-assert cnt == int(MPII.NUMBER_OF_DATA * MPII.TRAIN_RATIO) * 2
+with tf.variable_scope('input'):
+    images = tf.placeholder(
+        name='images',
+        dtype=tf.float32,
+        shape=[None, 256, 256, 3])
+    heatmaps = tf.placeholder(
+        name='heatmaps',
+        dtype=tf.float32,
+        shape=[None, 64, 64, len(JOINT)])
 
 
+class tf_Spectrum:
+    Color = tf.constant([
+        [0, 0, 128],
+        [0, 0, 255],
+        [0, 255, 0],
+        [255, 255, 0],
+        [255, 0, 0]
+    ], dtype=tf.float32)
 
-reader = DataCenter(root=os.path.expanduser('~/Workspace/data/')) \
-    .request(data='FLIC', task='train', metric='PCK')
 
-assert FLIC.NUMBER_OF_DATA == 5003
+def tf_gray2color(gray, spectrum=tf_Spectrum.Color):
+    indices = tf.floor_div(gray, 64)
 
-batch = reader.getBatch(size=8)
-for idx in range(8):
-    imageio.imwrite('../img/image_FLIC_' + str(idx) + '.jpg', batch[0][idx])
-    for y in range(64):
-        for x in range(64):
-            batch[1][idx][y, x, 0] = max(batch[1][idx][y, x, :])
-    imageio.imwrite('../img/heat_FLIC_' + str(idx) + '.jpg', batch[1][idx][:, :, 0])
-one_epoch = int(FLIC.NUMBER_OF_DATA * FLIC.TRAIN_RATIO) * 2
-cnt = 0
-reader.reset()
-test_iter = tqdm(total=one_epoch)
-for _ in range(one_epoch):
-    batch = reader.getBatch(size=8)
-    cnt = cnt + batch[0].shape[0]
-    test_iter.update(batch[0].shape[0])
-test_iter.close()
+    t = tf.expand_dims((gray - indices * 64) / (64), axis=-1)
+    indices = tf.cast(indices, dtype=tf.int32)
 
-assert cnt == int(FLIC.NUMBER_OF_DATA * FLIC.TRAIN_RATIO) * 2
-'''
+    return tf.add(
+        tf.multiply(tf.gather(spectrum, indices), 1 - t),
+        tf.multiply(tf.gather(spectrum, indices + 1), t)
+    )
 
-print('complete.')
+
+def tf_merge(rgb, heat):
+    heat = tf.image.resize_images(
+        heat,
+        [256, 256]
+    )
+    heat = tf.reduce_max(
+        heat,
+        axis=-1
+    )
+    return tf.cast(
+        tf.add(
+            tf.multiply(
+                tf_gray2color(heat),
+                0.6
+            ),
+            tf.multiply(rgb, 0.4)
+        ),
+        dtype=tf.uint8
+    )
+
+
+overlayed = tf_merge(images, heatmaps)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    reader = DataCenter(root=os.path.expanduser('~/Workspace/data/')) \
+        .request(data='MPII', task='train', metric='PCKh')
+
+    one_epoch = int(MPII.NUMBER_OF_DATA * MPII.TRAIN_RATIO) * 2
+    cnt = 0
+    iter = tqdm(total=one_epoch)
+    while True:
+        gt_image, gt_heatmap, _, _, _= reader.getBatch(8)
+
+        returned = gt_image.shape[0]
+
+        if returned == 0:
+            break
+
+        result = sess.run(
+            overlayed,
+            feed_dict={
+                images: gt_image,
+                heatmaps: gt_heatmap
+            }
+        )
+
+        for idx in range(returned):
+            imageio.imwrite('../img/' + str(cnt + idx + 1) + '.jpg', result[idx])
+
+        iter.update(returned)
+        cnt += returned
+    iter.close()

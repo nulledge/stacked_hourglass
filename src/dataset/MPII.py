@@ -3,14 +3,14 @@ import random
 import numpy as np
 from PIL import Image
 
-from src.data_impl.util import cropRGB, transformImage, transformPosition, generateHeatmap
+from .util import cropRGB, transformImage, transformPosition, generateHeatmap
 from .joint import JOINT
 from functools import lru_cache
 import os
 
 ''' MPII data reader
 
-Attribs:
+Attrib:
     NUMBER_OF_DATA: The number of data in MPII annotated as training data.
         MPII does not provide any test data, This reader divides training data
         into train/eval set.

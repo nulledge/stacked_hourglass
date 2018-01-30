@@ -1,7 +1,8 @@
 import os
 
-from src.data_impl.FLIC import FLIC
-from src.data_impl.MPII import MPII
+from .MIX import *
+from .FLIC import *
+from .MPII import *
 
 ''' Common interface to combine data, task and metric.
 '''
@@ -32,5 +33,7 @@ class DataCenter(object):
             return FLIC(root=path, task=task, metric=metric)
         elif data == 'MPII':
             return MPII(root=path, task=task, metric=metric)
+        elif data == 'MIX':
+            return MIX(root=path, task=task, metric=metric)
         else:
             raise NotImplementedError()

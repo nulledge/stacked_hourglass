@@ -24,6 +24,7 @@ def transformImage(image, rotate, scale):
         new_length = int(256 * scale)
         new_center = int(256 // 2 * scale)
         image = scipy.misc.imresize(image, (new_length, new_length))
+        image = scipy.misc.imrotate(image, rotate)
         image = image[
                 new_center - 256 // 2: new_center + 256 // 2,
                 new_center - 256 // 2: new_center + 256 // 2,
@@ -41,8 +42,8 @@ def transformImage(image, rotate, scale):
             ),
             'constant', constant_values=(0, 0)
         )
+        image = scipy.misc.imrotate(image, rotate)
         image = scipy.misc.imresize(image, (256, 256))
-    image = scipy.misc.imrotate(image, rotate)
     return image
 
 

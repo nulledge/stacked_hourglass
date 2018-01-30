@@ -1,11 +1,4 @@
-import sys, os
-script_path = os.path.split(os.path.realpath(__file__))[0]
-
-src_path = os.path.join(script_path, '../')
-sys.path.append(src_path)
-
-import layer
-
+from .. import layer
 import tensorflow as tf
 
 def bottleneck(input, train, kchannel = None, name = 'bottleneck'):
