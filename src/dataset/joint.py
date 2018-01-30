@@ -21,6 +21,8 @@ class JOINT(Enum):
     L_Ankle = 10
     R_Ankle = 11
 
+    '''
+
     L_Eye = 12
     R_Eye = 13
     L_Ear = 14
@@ -39,9 +41,10 @@ class JOINT(Enum):
     M_RUpperLeg = 26
     M_LLowerLeg = 27
     M_RLowerLeg = 28
+    '''
 
     # MPII
-    M_Pelvis = 29
-    M_Thorax = 30
-    M_UpperNeck = 31
-    M_HeadTop = 32
+    M_Pelvis = 12
+    M_Thorax = 13
+    M_UpperNeck = 14
+    M_HeadTop = 15

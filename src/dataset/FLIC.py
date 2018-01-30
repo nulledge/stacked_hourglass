@@ -29,10 +29,7 @@ class FLIC:
         JOINT.R_Elbow: 4,
         JOINT.R_Wrist: 5,
         JOINT.L_Hip: 6,
-        JOINT.R_Hip: 9,
-        JOINT.L_Eye: 12,
-        JOINT.R_Eye: 13,
-        JOINT.M_Nose: 16
+        JOINT.R_Hip: 9
     }
 
     ''' Initialize FLIC reader.
@@ -146,9 +143,13 @@ class FLIC:
         for index in range(len(batch_index)):
             batch_rgb[index][:, :, :] = self.__getRGB(batch_index[index])
 
+        batch_masking = np.ndarray(shape=(len(batch_index), len(JOINT)), dtype=np.bool)
+        for index in range(len(batch_index)):
+            batch_masking[index][:] = FLIC.__getMasking()
+
         batch_heat = np.ndarray(shape=(len(batch_index), 64, 64, len(JOINT)), dtype=np.float32)
         for index in range(len(batch_index)):
-            batch_heat[index][:, :, :] = self.__getHeat(batch_index[index])
+            batch_heat[index][:, :, :], batch_masking[index][:] = self.__getHeat(batch_index[index], batch_masking[index])
 
         batch_pose = np.ndarray(shape=(len(batch_index), len(JOINT), 2), dtype=np.float32)
         for index in range(len(batch_index)):
@@ -158,7 +159,7 @@ class FLIC:
         for index in range(len(batch_index)):
             batch_threshold.append(self.__getThreshold(batch_index[index]))
 
-        return batch_rgb, batch_heat, batch_pose, batch_threshold, FLIC.__getMasking()
+        return batch_rgb, batch_heat, batch_pose, batch_threshold, batch_masking
 
     ''' Set to read data from initial.
     '''
@@ -227,7 +228,7 @@ class FLIC:
         if center['horizontal'] + length // 2 >= resolution['horizontal']:
             pad['horizontal']['right'] = center['horizontal'] + length // 2 - resolution['horizontal']
 
-        return center, length, pad
+        return center, length, pad, resolution
 
     ''' Get RGB image.
 
@@ -240,7 +241,7 @@ class FLIC:
 
     def __getRGB(self, index):
         index, rotate, scale = index
-        center, length, pad = self.__getPadding(index)
+        center, length, pad, _ = self.__getPadding(index)
         image_path = os.path.join(
             self.__extract_path,
             'images',
@@ -260,30 +261,45 @@ class FLIC:
         Heatmap images of 64*64 px for all joints.
     '''
 
-    def __getHeat(self, index):
+    def __getHeat(self, index, masking):
         index, rotate, scale = index
         heatmaps = np.ndarray(shape=(64, 64, len(JOINT)), dtype=np.float32)
-        center, length, _ = self.__getPadding(index)
+        center, length, _, resolution = self.__getPadding(index)
 
         horizontal, vertical = FLIC.__squeeze(self.__annotation, [index, 'coords'])
 
         for joint in JOINT:
+            heatmaps[:, :, joint.value] = 0
             if joint not in FLIC.JOINT_TO_INDEX:
-                heatmaps[:, :, joint.value] = 0
-            else:
-                resize = 64 / length
-                pose = {
-                    'vertical': vertical[FLIC.JOINT_TO_INDEX[joint]] * resize,
-                    'horizontal': (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length // 2) * resize
-                }
-                pose = transformPosition(
-                    pose,
-                    rotate=rotate,
-                    scale=scale
+                continue
+            resize = 64 / length
+            outlier = int(vertical[FLIC.JOINT_TO_INDEX[joint]]) not in range(0, resolution['vertical'])\
+                or int(horizontal[FLIC.JOINT_TO_INDEX[joint]]) not in range(0, resolution['horizontal'])
+            pose = {
+                'vertical': vertical[FLIC.JOINT_TO_INDEX[joint]] * resize,
+                'horizontal': (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length // 2) * resize
+            }
+            outlier = outlier\
+                or int(pose['vertical']) not in range(0, 64)\
+                or int(pose['horizontal']) not in range(0, 64)
+            pose, outlier_after_transform = transformPosition(
+                pose,
+                rotate=rotate,
+                scale=scale
+            )
+            outlier = outlier or outlier_after_transform
+            if outlier:
+                masking[joint.value] = False
+                image_path = os.path.join(
+                    self.__extract_path,
+                    'images',
+                    FLIC.__squeeze(self.__annotation, ['filepath', index]).item()
                 )
+                print(image_path)
+                continue
 
-                heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
-        return heatmaps
+            heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
+        return heatmaps, masking
 
     ''' Get joint positions.
 
@@ -297,7 +313,7 @@ class FLIC:
     def __getPosition(self, index):
         index, rotate, scale = index
         position = np.ndarray(shape=(len(JOINT), 2))
-        center, length, pad = self.__getPadding(index)
+        center, length, pad, resolution = self.__getPadding(index)
 
         horizontal, vertical = FLIC.__squeeze(self.__annotation, [index, 'coords'])
 
@@ -310,7 +326,7 @@ class FLIC:
                     'vertical': vertical[FLIC.JOINT_TO_INDEX[joint]] * resize,
                     'horizontal': (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length // 2) * resize
                 }
-                pose = transformPosition(
+                pose, _ = transformPosition(
                     pose,
                     rotate=rotate,
                     scale=scale

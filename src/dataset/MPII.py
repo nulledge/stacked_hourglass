@@ -177,9 +177,13 @@ class MPII:
         for index in range(len(batch_index)):
             batch_rgb[index][:, :, :] = self.__getRGB(batch_index[index])
 
+        batch_masking = np.ndarray(shape=(len(batch_index), len(JOINT)), dtype=np.bool)
+        for index in range(len(batch_index)):
+            batch_masking[index][:] = MPII.__getMasking()
+
         batch_heat = np.ndarray(shape=(len(batch_index), 64, 64, len(JOINT)), dtype=np.float32)
         for index in range(len(batch_index)):
-            batch_heat[index][:, :, :] = self.__getHeat(batch_index[index])
+            batch_heat[index][:, :, :], batch_masking[index][:] = self.__getHeat(batch_index[index], batch_masking[index][:])
 
         batch_pose = np.ndarray(shape=(len(batch_index), len(JOINT), 2), dtype=np.float32)
         for index in range(len(batch_index)):
@@ -189,7 +193,7 @@ class MPII:
         for index in range(len(batch_index)):
             batch_threshold.append(self.__getThreshold(batch_index[index]))
 
-        return batch_rgb, batch_heat, batch_pose, batch_threshold, MPII.__getMasking()
+        return batch_rgb, batch_heat, batch_pose, batch_threshold, batch_masking
 
     ''' Set to read data from initial.
     '''
@@ -277,7 +281,7 @@ class MPII:
         if center['horizontal'] + length // 2 >= resolution['horizontal']:
             pad['horizontal']['right'] = center['horizontal'] + length // 2 - resolution['horizontal']
 
-        return center, length, pad
+        return center, length, pad, resolution
 
     ''' Get RGB image.
 
@@ -289,7 +293,7 @@ class MPII:
     '''
 
     def __getRGB(self, index):
-        center, length, pad = self.__getPadding(index)
+        center, length, pad, _ = self.__getPadding(index)
         path = self.__getImagePath(index)
         _, _, rotate, scale = index
         image = cropRGB(path, center, length, pad)
@@ -305,9 +309,9 @@ class MPII:
         Heatmap images of 64*64 px for all joints.
     '''
 
-    def __getHeat(self, index):
+    def __getHeat(self, index, masking):
         heatmaps = np.ndarray(shape=(64, 64, len(JOINT)))
-        center, length, pad = self.__getPadding(index)
+        center, length, pad, resolution = self.__getPadding(index)
         img_idx, r_idx, rotate, scale = index
 
         keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0][
@@ -319,25 +323,31 @@ class MPII:
                 continue
             n_joint = keypoints_ref.shape[1]
             for joint_idx in range(n_joint):
-                try:
-                    visible = not (not keypoints_ref[0, joint_idx]['is_visible']
-                                   or keypoints_ref[0, joint_idx]['is_visible'] == '0'
-                                   or keypoints_ref[0, joint_idx]['is_visible'] == 0)
-                except:
-                    visible = True
                 tag = keypoints_ref[0, joint_idx]['id'][0, 0]
 
-                if MPII.JOINT_TO_INDEX[joint] != tag or visible == False:
+                if MPII.JOINT_TO_INDEX[joint] != tag:
                     continue
 
                 resize = 64 / length
+                outlier = int(keypoints_ref[0, joint_idx]['y'][0, 0]) not in range(0, resolution['vertical'])\
+                    or int(keypoints_ref[0, joint_idx]['x'][0, 0]) not in range(0, resolution['horizontal'])
                 pose = {
                     'vertical': (keypoints_ref[0, joint_idx]['y'][0, 0] + length // 2 - center['vertical']) * resize,
                     'horizontal': (keypoints_ref[0, joint_idx]['x'][0, 0] + length // 2 - center['horizontal']) * resize
                 }
-                pose = transformPosition(pose, rotate, scale)
+                outlier = outlier\
+                    or int(pose['vertical']) not in range(0, 64)\
+                    or int(pose['horizontal']) not in range(0, 64)
+                pose, outlier_after_transform = transformPosition(pose, rotate, scale)
+                outlier = outlier or outlier_after_transform
+                if outlier:
+                    masking[joint.value] = False
+                    image_path = self.__getImagePath(index)
+                    print(index, image_path)
+                    continue
+
                 heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
-        return heatmaps
+        return heatmaps, masking
 
     ''' Get joint positions.
 
@@ -350,7 +360,7 @@ class MPII:
 
     def __getPosition(self, index):
         position = np.ndarray(shape=(len(JOINT), 2))
-        center, length, pad = self.__getPadding(index)
+        center, length, pad, _ = self.__getPadding(index)
 
         img_idx, r_idx, rotate, scale = index
 
@@ -362,15 +372,9 @@ class MPII:
                 continue
             n_joint = keypoints_ref.shape[1]
             for joint_idx in range(n_joint):
-                try:
-                    visible = not (not keypoints_ref[0, joint_idx]['is_visible']
-                                   or keypoints_ref[0, joint_idx]['is_visible'] == '0'
-                                   or keypoints_ref[0, joint_idx]['is_visible'] == 0)
-                except:
-                    visible = True
                 tag = keypoints_ref[0, joint_idx]['id'][0, 0]
 
-                if MPII.JOINT_TO_INDEX[joint] != tag or visible == False:
+                if MPII.JOINT_TO_INDEX[joint] != tag:
                     continue
 
                 resize = 64 / length
@@ -378,7 +382,7 @@ class MPII:
                     'vertical': (keypoints_ref[0, joint_idx]['y'][0, 0] + length // 2 - center['vertical']) * resize,
                     'horizontal': (keypoints_ref[0, joint_idx]['x'][0, 0] + length // 2 - center['horizontal']) * resize
                 }
-                pose = transformPosition(pose, rotate, scale)
+                pose, _ = transformPosition(pose, rotate, scale)
 
                 position[joint.value, :] = [pose['vertical'], pose['horizontal']]
 
@@ -394,7 +398,7 @@ class MPII:
     '''
 
     def __getThresholdPCKh(self, index):
-        _, length, _ = self.__getPadding(index)
+        _, length, _, _ = self.__getPadding(index)
         img_idx, r_idx, _, _ = index
         human_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
 

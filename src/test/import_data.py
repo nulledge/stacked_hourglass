@@ -3,8 +3,8 @@ import os
 from tqdm import tqdm
 import tensorflow as tf
 
-from src.data import DataCenter, MPII, FLIC
-from src.data.joint import JOINT
+from src.dataset import DataCenter, MPII, FLIC
+from src.dataset.joint import JOINT
 
 with tf.variable_scope('input'):
     images = tf.placeholder(
@@ -70,7 +70,7 @@ with tf.Session() as sess:
     one_epoch = int(MPII.NUMBER_OF_DATA * MPII.TRAIN_RATIO) * 2
     cnt = 0
     iter = tqdm(total=one_epoch)
-    while True:
+    for _ in range(1):
         gt_image, gt_heatmap, _, _, _= reader.getBatch(8)
 
         returned = gt_image.shape[0]

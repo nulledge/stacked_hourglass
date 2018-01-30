@@ -78,8 +78,10 @@ def transformPosition(pose, rotate, scale):
             'horizontal': rotated_in_crop_space['horizontal'] + 64 // 2
         }
 
+    outlier = int(pose['vertical']) not in range(0, 64)\
+              or int(pose['horizontal']) not in range(0, 64)
 
-    return pose
+    return pose, outlier
 
 
 ''' Crop RGB image
