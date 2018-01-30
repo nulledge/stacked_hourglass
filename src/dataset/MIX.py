@@ -1,18 +1,25 @@
-'''from . import DataCenter
 from .FLIC import FLIC
 from .MPII import MPII
+import random
 
 import numpy as np
+import os
 
 
 class MIX:
-    def __init__(self, root, task, metric):
-        self.__root = root
-        self.__task = task
-        self.__metric = metric
+    def __init__(self, root, task):
+        assert task == 'train'
 
-        self.__FLIC = DataCenter(root=root).request(data='FLIC', task=task, metric='PCK')
-        self.__MPII = DataCenter(root=root).request(data='MPII', task=task, metric='PCKh')
+        FLIC_path = os.path.join(root, 'FLIC')
+        MPII_path = os.path.join(root, 'MPII')
+
+        self.__FLIC = FLIC(root=FLIC_path, task=task, metric='PCK')
+        self.__MPII = MPII(root=MPII_path, task=task, metric='PCKh')
+
+        self.__index = [0 for _ in range(len(self.__FLIC))]\
+                       + [1 for _ in range(len(self.__MPII))]
+        random.shuffle(self.__index)
+        self.__seeker = 0
 
     def __delete__(self):
         pass
@@ -20,14 +27,40 @@ class MIX:
     def reset(self):
         self.__FLIC.reset()
         self.__MPII.reset()
+        random.shuffle(self.__index)
+        self.__seeker = 0
 
     def getBatch(self, size):
-        FLIC_ratio = FLIC.NUMBER_OF_DATA / (MPII.NUMBER_OF_DATA + FLIC.NUMBER_OF_DATA)
-        FLIC_size = size * FLIC_ratio
+        batch_rgb = []
+        batch_heat = []
+        batch_pose = []
+        batch_threshold = []
+        batch_mask = []
 
-        FLIC_rgb, FLIC_heat, FLIC_pose, FLIC_threshold, FLIC_ = self.__FLIC.getBatch(FLIC_size)
-        batch_MPII = self.__MPII.getBatch(size - FLIC_size)
+        for _ in range(size):
+            if self.__seeker == len(self):
+                break
 
-        FLIC_size = batch_FLIC[0].shape[0]
-        MPII_size = batch_MPII[0].shape[0]
-'''
+            if self.__index[self.__seeker] == 0:
+                rgb, heat, pose, threshold, mask = self.__FLIC.getBatch(1)
+            elif self.__index[self.__seeker] == 1:
+                rgb, heat, pose, threshold, mask = self.__MPII.getBatch(1)
+            else:
+                raise IndexError()
+
+            batch_rgb.append(rgb[0])
+            batch_heat.append(heat[0])
+            batch_pose.append(pose[0])
+            batch_threshold.append(threshold[0])
+            batch_mask.append(mask[0])
+
+            self.__seeker += 1
+
+        return np.stack(batch_rgb), \
+               np.stack(batch_heat), \
+               np.stack(batch_pose), \
+               np.stack(batch_threshold), \
+               np.stack(batch_mask)
+
+    def __len__(self):
+        return len(self.__index)

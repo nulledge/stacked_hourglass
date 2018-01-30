@@ -202,6 +202,12 @@ class MPII:
         self.__seeker = 0
         random.shuffle(self.__index)
 
+    ''' Get data size.
+    '''
+
+    def __len__(self):
+        return len(self.__index)
+
     ''' Read indices from task index file.
 
     If one epoch is done, do not return anymore.

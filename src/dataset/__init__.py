@@ -34,6 +34,6 @@ class DataCenter(object):
         elif data == 'MPII':
             return MPII(root=path, task=task, metric=metric)
         elif data == 'MIX':
-            return MIX(root=path, task=task, metric=metric)
+            return MIX(root=self.__root, task=task)
         else:
             raise NotImplementedError()

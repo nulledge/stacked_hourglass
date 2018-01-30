@@ -168,6 +168,12 @@ class FLIC:
         self.__seeker = 0
         random.shuffle(self.__index)
 
+    ''' Get the size of data.
+    '''
+
+    def __len__(self):
+        return len(self.__index)
+
     ''' Read indices from task index file.
 
     If one epoch is done, do not return anymore.

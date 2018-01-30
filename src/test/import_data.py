@@ -3,7 +3,7 @@ import os
 from tqdm import tqdm
 import tensorflow as tf
 
-from src.dataset import DataCenter, MPII, FLIC
+from src.dataset import DataCenter, MPII, FLIC, MIX
 from src.dataset.joint import JOINT
 
 with tf.variable_scope('input'):
@@ -65,7 +65,7 @@ overlayed = tf_merge(images, heatmaps)
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     reader = DataCenter(root=os.path.expanduser('~/Workspace/data/')) \
-        .request(data='MPII', task='train', metric='PCKh')
+        .request(data='MIX', task='train', metric='PCKh')
 
     one_epoch = int(MPII.NUMBER_OF_DATA * MPII.TRAIN_RATIO) * 2
     cnt = 0
