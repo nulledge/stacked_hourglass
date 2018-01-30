@@ -172,8 +172,6 @@ class MPII:
     def getBatch(self, size):
 
         batch_index = self.__loadBatchIndex(size)
-        for idx in batch_index:
-            print(idx, self.__getImagePath(idx))
 
         batch_rgb = np.ndarray(shape=(len(batch_index), 256, 256, 3), dtype=np.float32)
         for index in range(len(batch_index)):
