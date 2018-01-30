@@ -30,12 +30,12 @@ import imageio
 import numpy as np
 from tqdm import tqdm as tqdm
 
-from src.dataset import DataCenter
-from src.dataset.FLIC import FLIC
-from src.dataset.MPII import MPII
-from src.dataset.joint import JOINT
-from src import layer
-from src import module
+from dataset import DataCenter
+from dataset.FLIC import FLIC
+from dataset.MPII import MPII
+from dataset.joint import JOINT
+import layer
+import module
 
 # In[ ]:
 
@@ -167,8 +167,7 @@ def tf_merge(rgb, heat):
 
 last_stage = 2
 heatmaps = []
-if FLAGS.task == 'eval':
-    output = []
+output = []
 
 for stage in range(1, last_stage+1):
     with tf.variable_scope('hourglass_' + str(stage)):
@@ -185,12 +184,11 @@ for stage in range(1, last_stage+1):
             heatmap = layer.conv(input = net, ksize = 1, kchannel = len(JOINT)) # 64 * 64 * joint
             
             heatmaps.append(heatmap)
-            if FLAGS.task == 'eval':
-                output.append(tf_merge(images, heatmap))
+            output.append(tf_merge(images, heatmap))
 
         if stage != last_stage:
             net = layer.conv(input = net, ksize = 1, kchannel = 256, name = 'inter')                + layer.conv(input = heatmap, ksize = 1, kchannel = 256, name = 'heatmap')                + prev # 64 * 64 * 256
-
+summary_visualize = tf.summary.image('visualize', output[-1])
 
 # In[ ]:
 
@@ -288,23 +286,23 @@ else:
             feed_dict = {
                 images: eval_images,
                 heatmaps_groundtruth: eval_heatmaps,
-                train: False})
+                train: False,
+                mask: eval_mask})
         eval_iter.update(eval_images.shape[0])
         
         for batch in range(eval_images.shape[0]):                
             py = pred[batch] // 64
             px = pred[batch] % 64
             for joint in JOINT:
-                if joint not in FLIC.JOINT_TO_INDEX:
+                if joint not in MPII.JOINT_TO_INDEX or eval_mask[batch][joint.value] == False:
                     continue
                 dist = np.linalg.norm(
                     np.array([py[joint.value], px[joint.value]])
                     - np.array(eval_pose[batch][joint.value]))
                 if dist <= eval_threshold[batch] * FLAGS.metric_coefficient:
                     cnt[joint.value] += 1
-            imageio.imwrite('img/result' + str(i) + '_' + str(batch) + '_' + str(cnt) + '_' + str(len(MPII.JOINT_TO_INDEX)) + '.png', result[-1][batch])
     for joint in JOINT:
-        if joint not in FLIC.JOINT_TO_INDEX:
+        if joint not in MPII.JOINT_TO_INDEX:
             continue
         print(joint, cnt[joint.value] / one_epoch * 100, end = '%\n')
                 
