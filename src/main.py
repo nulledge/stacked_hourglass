@@ -165,7 +165,7 @@ def tf_merge(rgb, heat):
 # In[ ]:
 
 
-last_stage = 2
+last_stage = 8
 heatmaps = []
 output = []
 
@@ -187,7 +187,9 @@ for stage in range(1, last_stage+1):
             output.append(tf_merge(images, heatmap))
 
         if stage != last_stage:
-            net = layer.conv(input = net, ksize = 1, kchannel = 256, name = 'inter')                + layer.conv(input = heatmap, ksize = 1, kchannel = 256, name = 'heatmap')                + prev # 64 * 64 * 256
+            net = layer.conv(input = net, ksize = 1, kchannel = 256, name = 'inter')\
+            + layer.conv(input = heatmap, ksize = 1, kchannel = 256, name = 'heatmap')\
+            + prev # 64 * 64 * 256
 summary_visualize = tf.summary.image('visualize', output[-1])
 
 # In[ ]:
@@ -216,7 +218,6 @@ if FLAGS.task == 'eval':
          axis = -2
      )
 
-
 # In[ ]:
 
 
@@ -237,17 +238,13 @@ else:
     file_name = 'None'
     sess.run(tf.global_variables_initializer())
 
-
 # In[ ]:
 
 
 if FLAGS.task == 'train':
     idx = 0
     for epoch in range(1, FLAGS.epoch + 1):
-        if FLAGS.name_of_data == 'FLIC':
-            one_epoch = int(FLIC.NUMBER_OF_DATA * FLIC.TRAIN_RATIO) * 2
-        elif FLAGS.name_of_data == 'MPII':
-            one_epoch = int(MPII.NUMBER_OF_DATA * MPII.TRAIN_RATIO) * 2
+        one_epoch = len(reader)
         train_iter = tqdm(total = one_epoch, desc = 'epoch: ' + str(epoch) + '/' + str(FLAGS.epoch))
         reader.reset()
         for i in range(one_epoch):
@@ -267,7 +264,7 @@ if FLAGS.task == 'train':
             idx += 1
         train_iter.close();
         
-        save_path = saver.save(sess, os.path.join(FLAGS.path_to_pretrained, str(datetime.datetime.now()) + '_MPII_' + str(epoch)  + '_FLIC_0.ckpt'))
+        save_path = saver.save(sess, os.path.join(FLAGS.path_to_pretrained, 'MIX_' + str(epoch)  + '.ckpt'))
         print('save to:', save_path)
 else:
     if FLAGS.name_of_data == 'FLIC':
@@ -308,7 +305,6 @@ else:
                 
             
     eval_iter.close()
-
 
 # reader.resetBatch()
 # _, heat, _, _ = reader.getBatch(1)
