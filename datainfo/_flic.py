@@ -98,7 +98,7 @@ class FLIC:
         with open(self.__imageset_paths['train'], 'w') as train_set:
             for idx in tqdm(indices[0:int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA)]):
                 rand_rot, rand_scale = get_rand(0.0, FLIC.ROTATE_DEGREE), get_rand(1.0, FLIC.SCALE_FACTOR)
-                # train_set.write("%d %f %f\n" % (idx, rotate, scale))
+                train_set.write("%d %f %f\n" % (idx, rotate, scale))
                 train_set.write("%d %f %f\n" % (idx, rand_rot, rand_scale))  # image augmentation
 
         with open(self.__imageset_paths['eval'], 'w') as eval_set:

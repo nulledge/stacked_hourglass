@@ -127,8 +127,6 @@ class MPII:
 
         MPII.NUMBER_OF_DATA = len(indices)  # update length because wrong annotation
 
-        # random.shuffle(indices)
-
         def get_rand(pivot, factor):
             return random.uniform(pivot - factor, pivot + factor)
 
@@ -137,7 +135,7 @@ class MPII:
         with open(self.__imageset_paths['train'], 'w') as train_set:
             for idx in tqdm(indices[0:int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA)]):
                 rand_rot, rand_scale = get_rand(0.0, MPII.ROTATE_DEGREE), get_rand(1.0, MPII.SCALE_FACTOR)
-                # train_set.write("%d %d %f %f\n" % (idx[0], idx[1], rotate, scale))
+                train_set.write("%d %d %f %f\n" % (idx[0], idx[1], rotate, scale))
                 train_set.write("%d %d %f %f\n" % (idx[0], idx[1], rand_rot, rand_scale))  # image augmentation
 
         with open(self.__imageset_paths['eval'], 'w') as eval_set:
