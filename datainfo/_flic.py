@@ -51,7 +51,7 @@ class FLIC:
         self.shuffle = shuffle
         self.joints = len(JOINT)
 
-        self.__extract_path = os.path.join(root, 'FLIC-full')  # default dataset folder
+        self.__extract_path = os.path.join(root, 'FLIC')  # default dataset folder
         self.__imageset_paths = {
             'train': os.path.join(self.__extract_path, "flic-train.txt"),
             'eval': os.path.join(self.__extract_path, "flic-eval.txt"),

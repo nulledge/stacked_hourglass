@@ -1,4 +1,3 @@
-import os
 import random
 
 import numpy as np
@@ -8,46 +7,65 @@ from ._mpii import MPII
 
 
 class MIX:
-    def __init__(self, root, task):
+    def __init__(self, root, batch_size, task='train', shuffle=True):
         assert task == 'train'
 
-        FLIC_path = os.path.join(root, 'FLIC')
-        MPII_path = os.path.join(root, 'MPII')
+        self.root = root
+        self.batch_size = batch_size
+        self.task = task
+        self.shuffle = shuffle
 
-        self.__FLIC = FLIC(root=FLIC_path, task=task, metric='PCK')
-        self.__MPII = MPII(root=MPII_path, task=task, metric='PCKh')
+        self.__FLIC = FLIC(root=root, batch_size=1, task=task)
+        self.__MPII = MPII(root=root, batch_size=1, task=task)
 
-        self.__index = [0 for _ in range(len(self.__FLIC))] \
+        self.__order = [0 for _ in range(len(self.__FLIC))] \
                        + [1 for _ in range(len(self.__MPII))]
-        random.shuffle(self.__index)
+        if self.shuffle:
+            random.shuffle(self.__order)
         self.__seeker = 0
 
     def __delete__(self):
         pass
 
     def reset(self):
-        self.__FLIC.reset()
-        self.__MPII.reset()
-        random.shuffle(self.__index)
+        if self.shuffle:
+            random.shuffle(self.__order)
         self.__seeker = 0
 
-    def getBatch(self, size):
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.__seeker >= len(self):
+            self.reset()
+            self.__FLIC.reset()
+            self.__MPII.reset()
+            raise StopIteration
+
+        return self.getBatch()
+
+    def getBatch(self):
         batch_rgb = []
         batch_heat = []
         batch_pose = []
         batch_threshold = []
         batch_mask = []
 
-        for _ in range(size):
-            if self.__seeker == len(self):
-                break
+        prev_seeker = self.__seeker
+        self.__seeker += self.batch_size
+        mini_batch = self.__order[prev_seeker:self.__seeker]
 
-            if self.__index[self.__seeker] == 0:
-                rgb, heat, pose, threshold, mask = self.__FLIC.__getMiniBatch(1)
-            elif self.__index[self.__seeker] == 1:
-                rgb, heat, pose, threshold, mask = self.__MPII.getBatch(1)
-            else:
-                raise IndexError()
+        for target_set in mini_batch:
+
+            try:
+                if target_set == 0:
+                    rgb, heat, pose, threshold, mask = self.__FLIC.__next__()
+                elif target_set == 1:
+                    rgb, heat, pose, threshold, mask = self.__MPII.__next__()
+                else:
+                    raise IndexError()
+            except Exception as e:
+                print(e)
 
             batch_rgb.append(rgb[0])
             batch_heat.append(heat[0])
@@ -55,11 +73,8 @@ class MIX:
             batch_threshold.append(threshold[0])
             batch_mask.append(mask[0])
 
-            self.__seeker += 1
-
         return np.stack(batch_rgb), np.stack(batch_heat), \
                np.stack(batch_pose), np.stack(batch_threshold), np.stack(batch_mask)
 
-
-def __len__(self):
-    return len(self.__index)
+    def __len__(self):
+        return len(self.__order)
