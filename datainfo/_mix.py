@@ -1,9 +1,10 @@
-from .FLIC import FLIC
-from .MPII import MPII
+import os
 import random
 
 import numpy as np
-import os
+
+from ._flic import FLIC
+from ._mpii import MPII
 
 
 class MIX:
@@ -16,7 +17,7 @@ class MIX:
         self.__FLIC = FLIC(root=FLIC_path, task=task, metric='PCK')
         self.__MPII = MPII(root=MPII_path, task=task, metric='PCKh')
 
-        self.__index = [0 for _ in range(len(self.__FLIC))]\
+        self.__index = [0 for _ in range(len(self.__FLIC))] \
                        + [1 for _ in range(len(self.__MPII))]
         random.shuffle(self.__index)
         self.__seeker = 0
@@ -42,7 +43,7 @@ class MIX:
                 break
 
             if self.__index[self.__seeker] == 0:
-                rgb, heat, pose, threshold, mask = self.__FLIC.getBatch(1)
+                rgb, heat, pose, threshold, mask = self.__FLIC.__getMiniBatch(1)
             elif self.__index[self.__seeker] == 1:
                 rgb, heat, pose, threshold, mask = self.__MPII.getBatch(1)
             else:
@@ -56,11 +57,9 @@ class MIX:
 
             self.__seeker += 1
 
-        return np.stack(batch_rgb), \
-               np.stack(batch_heat), \
-               np.stack(batch_pose), \
-               np.stack(batch_threshold), \
-               np.stack(batch_mask)
+        return np.stack(batch_rgb), np.stack(batch_heat), \
+               np.stack(batch_pose), np.stack(batch_threshold), np.stack(batch_mask)
 
-    def __len__(self):
-        return len(self.__index)
+
+def __len__(self):
+    return len(self.__index)

@@ -1,5 +1,6 @@
-from src.module.bottleneck import bottleneck
 import tensorflow as tf
+
+import module
 
 with tf.variable_scope('bottleneck'):
     shape = [32, 64, 64, 256]
@@ -8,6 +9,6 @@ with tf.variable_scope('bottleneck'):
         name='input',
         dtype=tf.float32,
         shape=shape)
-    assert bottleneck(input=x, train=train).get_shape() == shape
+    assert module.bottleneck(inputs=x, is_training=train).get_shape() == shape
 
 print('complete.')

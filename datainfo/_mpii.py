@@ -1,12 +1,14 @@
-import scipy
-import random
-import numpy as np
-from PIL import Image
-
-from .util import cropRGB, transformImage, transformPosition, generateHeatmap
-from .joint import JOINT
-from functools import lru_cache
 import os
+import random
+from functools import lru_cache
+
+import numpy as np
+import scipy
+from PIL import Image
+from tqdm import tqdm
+
+from ._joint import JOINT
+from .utils import cropRGB, transformImage, transformPosition, generateHeatmap
 
 ''' MPII data reader
 
@@ -23,6 +25,8 @@ Attrib:
 class MPII:
     NUMBER_OF_DATA = 25994 + 2889
     TRAIN_RATIO = 0.9
+    ROTATE_DEGREE = 30
+    SCALE_FACTOR = 0.25
     JOINT_TO_INDEX = {
         JOINT.R_Ankle: 0,
         JOINT.R_Knee: 1,
@@ -50,54 +54,46 @@ class MPII:
         metric: 'PCKh' only.
     '''
 
-    def __init__(self, root, task, metric):
-        self.__extract_path = {'image': os.path.join(root, 'images'),
-                               'annotation': os.path.join(root, 'mpii_human_pose_v1_u12_2')}
-        self.__metric = metric
+    def __init__(self, root, batch_size, task='train', shuffle=True):
+        self.root = root
+        self.batch_size = batch_size
+        self.task = task
+        self.shuffle = shuffle
+        self.joints = len(JOINT)
 
-        self.__loadAnnotation()
+        self.__extract_path = os.path.join(root, 'MPII')
+        self.__annotation_path = os.path.join(self.__extract_path, 'mpii_human_pose_v1_u12_2')
+        self.__image_path = os.path.join(self.__extract_path, 'images')
+        self.__imageset_paths = {
+            'train': os.path.join(self.__extract_path, "mpii-train.txt"),
+            'eval': os.path.join(self.__extract_path, "mpii-eval.txt"),
+        }
 
-        # handle the task set as a file.
-        if not self.__validTaskSet(root, task):
-            self.__refreshTaskSet(root)
-        self.__taskSet = open(os.path.join(root, task + '.txt'), 'r')
-
-        self.__seeker = 0
-        self.__index = []
-        while True:
-            index = self.__taskSet.readline()
-            if index == '':
-                break
-            img_idx, r_idx, rotate, scale = index.split(' ')
-            self.__index.append((int(img_idx), int(r_idx), float(rotate), float(scale)))
-        random.shuffle(self.__index)
-
-    def __delete__(self):
-        self.__taskSet.close()
-
-    ''' Load MPII annotation matlab file.
-
-    The annotation file is loaded into self.__annotation.
-    '''
-
-    def __loadAnnotation(self):
-        matlab_path = os.path.join(self.__extract_path['annotation'], 'mpii_human_pose_v1_u12_1.mat')
+        # load annotation
+        matlab_path = os.path.join(self.__annotation_path, 'mpii_human_pose_v1_u12_1.mat')
         self.__annotation = scipy.io.loadmat(matlab_path)['RELEASE']
 
-    ''' Check if the task set file is valid.
+        # handle the task set as a file.
+        if not any(os.path.exists(path) for _, path in self.__imageset_paths.items()):
+            print('refresh task set at: %s' % root)
+            self.__refreshTaskSet()
 
-    The task set file is ${root}/${task}.txt.
+        # if not self.__validTaskSet(root, task):
+        #     self.__refreshTaskSet(root)
+        # self.__taskSet = open(os.path.join(root, task + '.txt'), 'r')
 
-    Args:
-        path: Path to the task set file.
-        task: 'train' or 'eval'.
+        self.__seeker = 0
+        self.__imageset = []
+        with open(self.__imageset_paths[task], 'r') as handle:
+            while True:
+                index = handle.readline()
+                if index == '':
+                    break
+                img_idx, r_idx, rotate, scale = index.split(' ')
+                self.__imageset.append((int(img_idx), int(r_idx), float(rotate), float(scale)))
 
-    Return:
-        True if task set file exists.
-    '''
-
-    def __validTaskSet(self, path, task):
-        return os.path.exists(os.path.join(path, task + '.txt'))
+        if self.shuffle:
+            random.shuffle(self.__imageset)
 
     ''' Refresh task sets.
 
@@ -107,7 +103,7 @@ class MPII:
     The task set files are ${root}/train.txt and ${root}/eval.txt.
     '''
 
-    def __refreshTaskSet(self, path):
+    def __refreshTaskSet(self):
         img_train = self.__annotation['img_train'][0, 0][0, :]
         indices = []
 
@@ -129,30 +125,24 @@ class MPII:
                           e,
                           self.__annotation['annolist'][0, 0][0, img_idx]['image'][0, 0]['name'][0])
 
-        MPII.NUMBER_OF_DATA = len(indices)
+        MPII.NUMBER_OF_DATA = len(indices)  # update length because wrong annotation
 
-        random.shuffle(indices)
+        # random.shuffle(indices)
 
-        with open(os.path.join(path, 'train.txt'), 'w') as train_set:
-            for i in range(int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA)):
-                scale = [1.0, random.uniform(0.75, 1.25)]
-                rotate = [0.0, random.uniform(-30.0, 30.0)]
-                for j in range(2):
-                    train_set.write(
-                        str(indices[i][0]) + ' '
-                        + str(indices[i][1]) + ' '
-                        + str(rotate[j]) + ' '
-                        + str(scale[j]) + '\n')
+        def get_rand(pivot, factor):
+            return random.uniform(pivot - factor, pivot + factor)
 
-        with open(os.path.join(path, 'eval.txt'), 'w') as eval_set:
-            for i in range(int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA), MPII.NUMBER_OF_DATA):
-                rotate = 0.0
-                scale = 1.0
-                eval_set.write(
-                    str(indices[i][0]) + ' '
-                    + str(indices[i][1]) + ' '
-                    + str(rotate) + ' '
-                    + str(scale) + '\n')
+        rotate = 0.0
+        scale = 1.0
+        with open(self.__imageset_paths['train'], 'w') as train_set:
+            for idx in tqdm(indices[0:int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA)]):
+                rand_rot, rand_scale = get_rand(0.0, MPII.ROTATE_DEGREE), get_rand(1.0, MPII.SCALE_FACTOR)
+                # train_set.write("%d %d %f %f\n" % (idx[0], idx[1], rotate, scale))
+                train_set.write("%d %d %f %f\n" % (idx[0], idx[1], rand_rot, rand_scale))  # image augmentation
+
+        with open(self.__imageset_paths['eval'], 'w') as eval_set:
+            for idx in tqdm(indices[int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA):]):
+                eval_set.write("%d %d %f %f\n" % (idx[0], idx[1], rotate, scale))
 
     ''' Read data with the number of specific size.
 
@@ -169,44 +159,48 @@ class MPII:
         Masks are shape of (joint).
     '''
 
-    def getBatch(self, size):
+    def __getMiniBatch(self, imageset_batch):
 
-        batch_index = self.__loadBatchIndex(size)
+        # batch_index = self.__loadBatchIndex(size)
 
-        batch_rgb = np.ndarray(shape=(len(batch_index), 256, 256, 3), dtype=np.float32)
-        for index in range(len(batch_index)):
-            batch_rgb[index][:, :, :] = self.__getRGB(batch_index[index])
-
-        batch_masking = np.ndarray(shape=(len(batch_index), len(JOINT)), dtype=np.bool)
-        for index in range(len(batch_index)):
-            batch_masking[index][:] = MPII.__getMasking()
-
-        batch_heat = np.ndarray(shape=(len(batch_index), 64, 64, len(JOINT)), dtype=np.float32)
-        for index in range(len(batch_index)):
-            batch_heat[index][:, :, :], batch_masking[index][:] = self.__getHeat(batch_index[index], batch_masking[index][:])
-
-        batch_pose = np.ndarray(shape=(len(batch_index), len(JOINT), 2), dtype=np.float32)
-        for index in range(len(batch_index)):
-            batch_pose[index][:, :] = self.__getPosition(batch_index[index])
-
+        batch_rgb = np.ndarray(shape=(len(imageset_batch), 256, 256, 3), dtype=np.float32)
+        batch_heatmap = np.ndarray(shape=(len(imageset_batch), 64, 64, self.joints), dtype=np.float32)
+        batch_masking = np.ndarray(shape=(len(imageset_batch), self.joints), dtype=np.bool)
+        batch_pose = np.ndarray(shape=(len(imageset_batch), self.joints, 2), dtype=np.float32)
         batch_threshold = []
-        for index in range(len(batch_index)):
-            batch_threshold.append(self.__getThreshold(batch_index[index]))
 
-        return batch_rgb, batch_heat, batch_pose, batch_threshold, batch_masking
+        for idx, image_info in enumerate(imageset_batch):
+            batch_rgb[idx][:, :, :] = self.__getRGB(image_info)
+            batch_heatmap[idx][:, :, :], batch_masking[idx][:] = self.__getHeatAndMasking(image_info)
+            batch_pose[idx][:, :] = self.__getPosition(image_info)
+            batch_threshold.append(self.__getThreshold(image_info))
+
+        return batch_rgb, batch_heatmap, batch_pose, batch_threshold, batch_masking
 
     ''' Set to read data from initial.
     '''
 
     def reset(self):
         self.__seeker = 0
-        random.shuffle(self.__index)
+        if self.shuffle:
+            random.shuffle(self.__imageset)
 
     ''' Get data size.
     '''
 
     def __len__(self):
-        return len(self.__index)
+        return len(self.__imageset)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        batch_imageset = self.__getImageSetBatch()
+        if not len(batch_imageset):
+            self.reset()
+            raise StopIteration
+
+        return self.__getMiniBatch(batch_imageset)
 
     ''' Read indices from task index file.
 
@@ -219,14 +213,19 @@ class MPII:
         Batch indices list from the task set.
     '''
 
-    def __loadBatchIndex(self, size):
-        batch_index = []
-        for _ in range(size):
-            if self.__seeker == len(self.__index):
-                break
-            batch_index.append(self.__index[self.__seeker])
-            self.__seeker += 1
-        return batch_index
+    def __getImageSetBatch(self):
+        prev_seeker = self.__seeker
+        self.__seeker += self.batch_size
+        return self.__imageset[prev_seeker:self.__seeker]
+
+    # def __loadBatchIndex(self, size):
+    #     batch_index = []
+    #     for _ in range(size):
+    #         if self.__seeker == len(self.__index):
+    #             break
+    #         batch_index.append(self.__index[self.__seeker])
+    #         self.__seeker += 1
+    #     return batch_index
 
     ''' Get image path.
 
@@ -238,11 +237,11 @@ class MPII:
     '''
 
     @lru_cache(maxsize=32)
-    def __getImagePath(self, index):
-        img_idx, r_idx, _, _ = index
+    def __getImagePath(self, image_info):
+        img_idx, r_idx, _, _ = image_info
 
         image_name = self.__annotation['annolist'][0, 0][0, img_idx]['image'][0, 0]['name'][0]
-        return os.path.join(self.__extract_path['image'], image_name)
+        return os.path.join(self.__image_path, image_name)
 
     ''' Calculate padding.
 
@@ -254,11 +253,11 @@ class MPII:
     '''
 
     @lru_cache(maxsize=32)
-    def __getPadding(self, index):
-        img_idx, r_idx, _, _ = index
+    def __getPadding(self, image_info):
+        img_idx, r_idx, _, _ = image_info
 
-        path = self.__getImagePath(index)
-        resolution = {}
+        path = self.__getImagePath(image_info)
+        resolution = dict()
         resolution['horizontal'], resolution['vertical'] = Image.open(path).size
 
         center = {
@@ -298,10 +297,10 @@ class MPII:
         RGB image of 256*256 px.
     '''
 
-    def __getRGB(self, index):
-        center, length, pad, _ = self.__getPadding(index)
-        path = self.__getImagePath(index)
-        _, _, rotate, scale = index
+    def __getRGB(self, image_info):
+        center, length, pad, _ = self.__getPadding(image_info)
+        path = self.__getImagePath(image_info)
+        _, _, rotate, scale = image_info
         image = cropRGB(path, center, length, pad)
         image = transformImage(image, rotate, scale)
         return image
@@ -315,10 +314,11 @@ class MPII:
         Heatmap images of 64*64 px for all joints.
     '''
 
-    def __getHeat(self, index, masking):
-        heatmaps = np.ndarray(shape=(64, 64, len(JOINT)))
-        center, length, pad, resolution = self.__getPadding(index)
-        img_idx, r_idx, rotate, scale = index
+    def __getHeatAndMasking(self, image_info):
+        img_idx, r_idx, rotate, scale = image_info
+        maskings = MPII.__getMasking()
+        heatmaps = np.ndarray(shape=(64, 64, self.joints), dtype=np.float32)
+        center, length, pad, resolution = self.__getPadding(image_info)
 
         keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0][
             'point']
@@ -335,23 +335,23 @@ class MPII:
                     continue
 
                 resize = 64 / length
-                outlier = int(keypoints_ref[0, joint_idx]['y'][0, 0]) not in range(0, resolution['vertical'])\
-                    or int(keypoints_ref[0, joint_idx]['x'][0, 0]) not in range(0, resolution['horizontal'])
+                outlier = int(keypoints_ref[0, joint_idx]['y'][0, 0]) not in range(0, resolution['vertical']) \
+                          or int(keypoints_ref[0, joint_idx]['x'][0, 0]) not in range(0, resolution['horizontal'])
                 pose = {
                     'vertical': (keypoints_ref[0, joint_idx]['y'][0, 0] + length // 2 - center['vertical']) * resize,
                     'horizontal': (keypoints_ref[0, joint_idx]['x'][0, 0] + length // 2 - center['horizontal']) * resize
                 }
-                outlier = outlier\
-                    or int(pose['vertical']) not in range(0, 64)\
-                    or int(pose['horizontal']) not in range(0, 64)
+                outlier = outlier \
+                          or int(pose['vertical']) not in range(0, 64) \
+                          or int(pose['horizontal']) not in range(0, 64)
                 pose, outlier_after_transform = transformPosition(pose, rotate, scale)
                 outlier = outlier or outlier_after_transform
                 if outlier:
-                    masking[joint.value] = False
+                    maskings[joint.value] = False
                     continue
                 heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
 
-        return heatmaps, masking
+        return heatmaps, maskings
 
     ''' Get joint positions.
 
@@ -362,11 +362,10 @@ class MPII:
         Positions for all joints.
     '''
 
-    def __getPosition(self, index):
-        position = np.ndarray(shape=(len(JOINT), 2))
-        center, length, pad, _ = self.__getPadding(index)
-
-        img_idx, r_idx, rotate, scale = index
+    def __getPosition(self, image_info):
+        img_idx, r_idx, rotate, scale = image_info
+        positions = np.ndarray(shape=(self.joints, 2))
+        center, length, pad, _ = self.__getPadding(image_info)
 
         keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0][
             'point']
@@ -388,9 +387,9 @@ class MPII:
                 }
                 pose, _ = transformPosition(pose, rotate, scale)
 
-                position[joint.value, :] = [pose['vertical'], pose['horizontal']]
+                positions[joint.value, :] = [pose['vertical'], pose['horizontal']]
 
-        return position
+        return positions
 
     ''' Calculate PCKh threshold.
 
@@ -401,9 +400,9 @@ class MPII:
         PCKh threshold
     '''
 
-    def __getThresholdPCKh(self, index):
-        _, length, _, _ = self.__getPadding(index)
-        img_idx, r_idx, _, _ = index
+    def __getThresholdPCKh(self, image_info):
+        _, length, _, _ = self.__getPadding(image_info)
+        img_idx, r_idx, _, _ = image_info
         human_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
 
         return np.linalg.norm(
@@ -419,11 +418,12 @@ class MPII:
         Threshold of metric.
     '''
 
-    def __getThreshold(self, index):
-        if self.__metric == 'PCK':
-            return self.__getThresholdPCK(index)
-        elif self.__metric == 'PCKh':
-            return self.__getThresholdPCKh(index)
+    def __getThreshold(self, image_info):
+        return self.__getThresholdPCKh(image_info)
+
+    # if self.__metric == 'PCK':
+    #     return self.__getThresholdPCK(index)
+    # elif self.__metric == 'PCKh':
 
     ''' Get mask of MPII.
 

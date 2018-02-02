@@ -1,26 +1,29 @@
 {
-    "project": "hourglass",
+  "model": {
+    "name": "hourglass",
+    "lr": 0.001,
+    "features": 128,
+    "batch_size": 8,
+    "task": "train",
+    "epoch": 100,
+    "path": "./ckpt",
     "pretrained": {
-        "path": "~/Workspace/pretrained/",
-        "load": true,
-        "save": true
-    },
-    "log": {
-        "path": "~/Workspace/log/",
-        "save": true
-    },
-    "data": {
-        "path": "~/Workspace/data/",
-        "name": "FLIC"
-    },
-    "task": {
-        "step": "train",
-        "train": {
-            "epoch": 100
-        },
-        "eval": {
-            "metric": "PCK",
-            "coefficient": 0.5
-        }
+      "is_using": false,
+      "path": "./ckpt-pre"
     }
+  },
+  "tensorboard": {
+    "is_using": true,
+    "path": "/media/grayish/Backup/tb-log"
+  },
+  "dataset": {
+    "name": "MPII",
+    "name-dummy1": "FLIC",
+    "name-dummy2": "MIX",
+    "path": "./dataset-files",
+    "metric": {
+      "name": "PCK",
+      "coefficient": 0.5
+    }
+  }
 }

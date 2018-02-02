@@ -1,11 +1,13 @@
-import scipy
-import random
-import numpy as np
-
-from .util import cropRGB, transformImage, transformPosition, generateHeatmap
-from .joint import JOINT
-from functools import lru_cache
 import os
+import random
+from functools import lru_cache
+
+import numpy as np
+import scipy
+from tqdm import tqdm
+
+from ._joint import JOINT
+from .utils import cropRGB, transformImage, transformPosition, generateHeatmap
 
 ''' FLIC data reader
 
@@ -21,6 +23,8 @@ Attribs:
 class FLIC:
     NUMBER_OF_DATA = 5003
     TRAIN_RATIO = 0.9
+    ROTATE_DEGREE = 30
+    SCALE_FACTOR = 0.25
     JOINT_TO_INDEX = {
         JOINT.L_Shoulder: 0,
         JOINT.L_Elbow: 1,
@@ -40,84 +44,66 @@ class FLIC:
         metric: 'PCK' or 'PCKt' only.
     '''
 
-    def __init__(self, root, task, metric):
-        self.__extract_path = os.path.join(root, 'FLIC')
-        self.__metric = metric
+    def __init__(self, root, batch_size, task='train', shuffle=True):
+        self.root = root
+        self.batch_size = batch_size
+        self.task = task
+        self.shuffle = shuffle
+        self.joints = len(JOINT)
 
-        self.__loadAnnotation()
+        self.__extract_path = os.path.join(root, 'FLIC-full')  # default dataset folder
+        self.__imageset_paths = {
+            'train': os.path.join(self.__extract_path, "flic-train.txt"),
+            'eval': os.path.join(self.__extract_path, "flic-eval.txt"),
+        }
 
-        # handle the task set as a file.
-        if not self.__validTaskSet(root, task):
-            self.__refreshTaskSet(root)
-        self.__taskSet = open(os.path.join(root, task + '.txt'), 'r')
-
-        self.__seeker = 0
-        self.__index = []
-        while True:
-            index = self.__taskSet.readline()
-            if index == '':
-                break
-            index, rotate, scale = index.split(' ')
-            self.__index.append((int(index), float(rotate), float(scale)))
-        random.shuffle(self.__index)
-
-    def __delete__(self):
-        self.__taskSet.close()
-
-    ''' Load FLIC annotation matlab file.
-
-    The annotation file is loaded into self.__annotation.
-    '''
-
-    def __loadAnnotation(self):
+        # load annotation
         matlab_path = os.path.join(self.__extract_path, 'examples.mat')
         self.__annotation = scipy.io.loadmat(matlab_path)['examples']
 
-    ''' Check if the task set file is valid.
+        # handle the task set as a file.
+        if not any(os.path.exists(path) for _, path in self.__imageset_paths.items()):
+            print('refresh task set at: %s' % root)
+            self.__refreshTaskSet()
 
-    The task set file is ${root}/${task}.txt.
+        self.__seeker = 0
+        self.__imageset = []  # tuple of image information. (index, rotation degree, scaling factor)
+        with open(self.__imageset_paths[task], 'r') as handle:
+            while True:
+                image_info = handle.readline()
+                if image_info == '':
+                    break
+                index, rotate, scale = image_info.split(' ')
+                self.__imageset.append((int(index), float(rotate), float(scale)))
 
-    Args:
-        path: Path to the task set file.
-        task: 'train' or 'eval'.
-
-    Return:
-        True if task set file exists.
-    '''
-
-    def __validTaskSet(self, path, task):
-        return os.path.exists(os.path.join(path, task + '.txt'))
+        if self.shuffle:
+            random.shuffle(self.__imageset)
 
     ''' Refresh task sets.
 
     Arg:
         path: Path to the task set file.
 
-    The task set files are ${root}/train.txt and ${root}/eval.txt.
+    The task set files are ${root}/flic-train.txt and ${root}/flic-eval.txt.
     '''
 
-    def __refreshTaskSet(self, path):
+    def __refreshTaskSet(self):
+        def get_rand(pivot, factor):
+            return random.uniform(pivot - factor, pivot + factor)
+
         indices = [index for index in range(FLIC.NUMBER_OF_DATA)]
-        random.shuffle(indices)
 
-        with open(os.path.join(path, 'train.txt'), 'w') as train_set:
-            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA)):
-                scale = [1.0, random.uniform(0.75, 1.25)]
-                rotate = [0.0, random.uniform(-30.0, 30.0)]
-                for j in range(2):
-                    train_set.write(
-                        str(indices[i]) + ' '
-                        + str(rotate[j]) + ' '
-                        + str(scale[j]) + '\n')
+        rotate = 0.0
+        scale = 1.0
+        with open(self.__imageset_paths['train'], 'w') as train_set:
+            for idx in tqdm(indices[0:int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA)]):
+                rand_rot, rand_scale = get_rand(0.0, FLIC.ROTATE_DEGREE), get_rand(1.0, FLIC.SCALE_FACTOR)
+                # train_set.write("%d %f %f\n" % (idx, rotate, scale))
+                train_set.write("%d %f %f\n" % (idx, rand_rot, rand_scale))  # image augmentation
 
-        with open(os.path.join(path, 'eval.txt'), 'w') as eval_set:
-            for i in range(int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA), FLIC.NUMBER_OF_DATA):
-                scale = 1.0
-                rotate = 0.0
-                eval_set.write(
-                    str(indices[i]) + ' '
-                    + str(rotate) + ' '
-                    + str(scale) + '\n')
+        with open(self.__imageset_paths['eval'], 'w') as eval_set:
+            for idx in tqdm(indices[int(FLIC.TRAIN_RATIO * FLIC.NUMBER_OF_DATA):]):
+                eval_set.write("%d %f %f\n" % (idx, rotate, scale))  # indices, rotate, scale
 
     ''' Read data with the number of specific size.
 
@@ -135,44 +121,47 @@ class FLIC:
         Masks are shape of (joint).
     '''
 
-    def getBatch(self, size):
+    def __getMiniBatch(self, imageset_batch):
+        # batch_index = self.__loadBatchIndex(size)
 
-        batch_index = self.__loadBatchIndex(size)
-
-        batch_rgb = np.ndarray(shape=(len(batch_index), 256, 256, 3), dtype=np.float32)
-        for index in range(len(batch_index)):
-            batch_rgb[index][:, :, :] = self.__getRGB(batch_index[index])
-
-        batch_masking = np.ndarray(shape=(len(batch_index), len(JOINT)), dtype=np.bool)
-        for index in range(len(batch_index)):
-            batch_masking[index][:] = FLIC.__getMasking()
-
-        batch_heat = np.ndarray(shape=(len(batch_index), 64, 64, len(JOINT)), dtype=np.float32)
-        for index in range(len(batch_index)):
-            batch_heat[index][:, :, :], batch_masking[index][:] = self.__getHeat(batch_index[index], batch_masking[index])
-
-        batch_pose = np.ndarray(shape=(len(batch_index), len(JOINT), 2), dtype=np.float32)
-        for index in range(len(batch_index)):
-            batch_pose[index][:, :] = self.__getPosition(batch_index[index])
-
+        batch_rgb = np.ndarray(shape=(len(imageset_batch), 256, 256, 3), dtype=np.float32)
+        batch_heatmap = np.ndarray(shape=(len(imageset_batch), 64, 64, self.joints), dtype=np.float32)
+        batch_masking = np.ndarray(shape=(len(imageset_batch), self.joints), dtype=np.bool)
+        batch_pose = np.ndarray(shape=(len(imageset_batch), self.joints, 2), dtype=np.float32)
         batch_threshold = []
-        for index in range(len(batch_index)):
-            batch_threshold.append(self.__getThreshold(batch_index[index]))
 
-        return batch_rgb, batch_heat, batch_pose, batch_threshold, batch_masking
+        for idx, image_info in enumerate(imageset_batch):
+            batch_rgb[idx][:, :, :] = self.__getRGB(image_info)
+            batch_heatmap[idx][:, :, :], batch_masking[idx][:] = self.__getHeatAndMasking(image_info)
+            batch_pose[idx][:, :] = self.__getPosition(image_info)
+            batch_threshold.append(self.__getThreshold())
+
+        return batch_rgb, batch_heatmap, batch_pose, batch_threshold, batch_masking
 
     ''' Set to read data from initial.
     '''
 
     def reset(self):
         self.__seeker = 0
-        random.shuffle(self.__index)
+        if self.shuffle:
+            random.shuffle(self.__imageset)
 
     ''' Get the size of data.
     '''
 
     def __len__(self):
-        return len(self.__index)
+        return len(self.__imageset)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        batch_imageset = self.__getImageSetBatch()
+        if not len(batch_imageset):
+            self.reset()
+            raise StopIteration
+
+        return self.__getMiniBatch(batch_imageset)
 
     ''' Read indices from task index file.
 
@@ -185,14 +174,17 @@ class FLIC:
         Batch indices list from the task set.
     '''
 
-    def __loadBatchIndex(self, size):
-        batch_index = []
-        for _ in range(size):
-            if self.__seeker == len(self.__index):
-                break
-            batch_index.append(self.__index[self.__seeker])
-            self.__seeker += 1
-        return batch_index
+    def __getImageSetBatch(self):
+        prev_seeker = self.__seeker
+        self.__seeker += self.batch_size
+        return self.__imageset[prev_seeker:self.__seeker]
+
+        # for _ in range(size):
+        #     if self.__seeker == len(self.__imageset):
+        #         break
+        #     batch_index.append(self.__imageset[self.__seeker])
+        #     self.__seeker += 1
+        # return batch_index
 
     ''' Calculate padding.
 
@@ -245,8 +237,8 @@ class FLIC:
         RGB image of 256*256 px.
     '''
 
-    def __getRGB(self, index):
-        index, rotate, scale = index
+    def __getRGB(self, image_info):
+        index, rotate, scale = image_info
         center, length, pad, _ = self.__getPadding(index)
         image_path = os.path.join(
             self.__extract_path,
@@ -267,9 +259,10 @@ class FLIC:
         Heatmap images of 64*64 px for all joints.
     '''
 
-    def __getHeat(self, index, masking):
-        index, rotate, scale = index
-        heatmaps = np.ndarray(shape=(64, 64, len(JOINT)), dtype=np.float32)
+    def __getHeatAndMasking(self, image_info):
+        index, rotate, scale = image_info
+        maskings = FLIC.__getMasking()
+        heatmaps = np.ndarray(shape=(64, 64, self.joints), dtype=np.float32)
         center, length, _, resolution = self.__getPadding(index)
 
         horizontal, vertical = FLIC.__squeeze(self.__annotation, [index, 'coords'])
@@ -279,15 +272,15 @@ class FLIC:
             if joint not in FLIC.JOINT_TO_INDEX:
                 continue
             resize = 64 / length
-            outlier = int(vertical[FLIC.JOINT_TO_INDEX[joint]]) not in range(0, resolution['vertical'])\
-                or int(horizontal[FLIC.JOINT_TO_INDEX[joint]]) not in range(0, resolution['horizontal'])
+            outlier = int(vertical[FLIC.JOINT_TO_INDEX[joint]]) not in range(0, resolution['vertical']) \
+                      or int(horizontal[FLIC.JOINT_TO_INDEX[joint]]) not in range(0, resolution['horizontal'])
             pose = {
                 'vertical': vertical[FLIC.JOINT_TO_INDEX[joint]] * resize,
                 'horizontal': (horizontal[FLIC.JOINT_TO_INDEX[joint]] - center['horizontal'] + length // 2) * resize
             }
-            outlier = outlier\
-                or int(pose['vertical']) not in range(0, 64)\
-                or int(pose['horizontal']) not in range(0, 64)
+            outlier = outlier \
+                      or int(pose['vertical']) not in range(0, 64) \
+                      or int(pose['horizontal']) not in range(0, 64)
             pose, outlier_after_transform = transformPosition(
                 pose,
                 rotate=rotate,
@@ -295,11 +288,11 @@ class FLIC:
             )
             outlier = outlier or outlier_after_transform
             if outlier:
-                masking[joint.value] = False
+                maskings[joint.value] = False
                 continue
             heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
 
-        return heatmaps, masking
+        return heatmaps, maskings
 
     ''' Get joint positions.
 
@@ -310,9 +303,9 @@ class FLIC:
         Positions for all joints.
     '''
 
-    def __getPosition(self, index):
-        index, rotate, scale = index
-        position = np.ndarray(shape=(len(JOINT), 2))
+    def __getPosition(self, image_info):
+        index, rotate, scale = image_info
+        position = np.ndarray(shape=(self.joints, 2))
         center, length, pad, resolution = self.__getPadding(index)
 
         horizontal, vertical = FLIC.__squeeze(self.__annotation, [index, 'coords'])
@@ -345,7 +338,7 @@ class FLIC:
         PCK threshold
     '''
 
-    def __getThresholdPCK(self, index):
+    def __getThresholdPCK(self):
         return 64
 
     ''' Get threshold of metric.
@@ -357,17 +350,19 @@ class FLIC:
         Threshold of metric.
     '''
 
-    def __getThreshold(self, index):
-        if self.__metric == 'PCK':
-            return self.__getThresholdPCK(index)
-        elif self.__metric == 'PCKh':
-            return self.__getThresholdPCKh(index)
+    def __getThreshold(self):
+        return self.__getThresholdPCK()
+        # if self.__metric == 'PCK':
+        #     return self.__getThresholdPCK(index)
+        # elif self.__metric == 'PCKh':
+        #     return self.__getThresholdPCKh(index)
 
     ''' Get mask of FLIC.
 
     Return:
         Binary list representing mask of FLIC.
     '''
+
     @staticmethod
     def __getMasking():
         return [(lambda joint: joint in FLIC.JOINT_TO_INDEX)(joint) for joint in JOINT]
@@ -384,6 +379,7 @@ class FLIC:
     Return:
         Parsed FLIC annotation.
     '''
+
     @staticmethod
     def __squeeze(annotation, indices):
         if len(indices) == 0:
