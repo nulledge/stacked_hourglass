@@ -75,7 +75,7 @@ def training(sess, model):
 
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
-            optimizer = tf.train.AdamOptimizer(name='optimizer', learning_rate=0.001).minimize(loss,
+            optimizer = tf.train.RMSPropOptimizer(name='optimizer', learning_rate=MODEL.lr).minimize(loss,
                                                                                                global_step=global_step)
 
     summary_merged = tf.summary.merge_all()

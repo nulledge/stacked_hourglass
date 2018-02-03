@@ -1,26 +1,26 @@
 {
   "model": {
     "name": "hourglass",
-    "lr": 0.001,
-    "features": 128,
+    "lr": 0.00025,
+    "features": 256,
     "batch_size": 8,
     "task": "train",
     "epoch": 100,
-    "path": "./ckpt",
+    "path": "/home/nulledge/Workspace/ckpt/",
     "pretrained": {
       "is_using": false,
-      "path": "./ckpt-pre"
+      "path": "/home/nulledge/Workspace/ckpt-pre/"
     }
   },
   "tensorboard": {
     "is_using": true,
-    "path": "/media/grayish/Backup/tb-log"
+    "path": "/home/nulledge/Workspace/log/"
   },
   "dataset": {
-    "name": "MPII",
+    "name": "MIX",
     "name-dummy1": "FLIC",
-    "name-dummy2": "MIX",
-    "path": "./dataset-files",
+    "name-dummy2": "MPII",
+    "path": "/home/nulledge/Datasets/",
     "metric": {
       "name": "PCK",
       "coefficient": 0.5
