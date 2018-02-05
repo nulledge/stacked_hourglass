@@ -3,4 +3,5 @@ from ._flic import FLIC
 from ._joint import JOINT
 from ._mix import MIX
 from ._mpii import MPII
+from ._lsp import LSP
 from .utils import *
