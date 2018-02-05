@@ -25,7 +25,7 @@ import tensorflow as tf
 from dotmap import DotMap
 from tqdm import tqdm as tqdm
 
-from datainfo import JOINT, getReader, MPII, FLIC
+from datainfo import JOINT, getReader
 # set logger
 from model import Model
 
@@ -163,7 +163,7 @@ def evalution(sess, model):
     total = np.zeros(shape=model.joints, dtype=np.float)
     with tqdm(total=len(reader), unit=' images') as pbar:
         for eval_images, eval_heatmaps, eval_poses, eval_thresholds, eval_masks in reader:
-            is_hit = sess.run(pred_hit,
+            is_hit, step = sess.run([pred_hit, tf.train.get_global_step()],
                  feed_dict={
                      model.images: eval_images,
                      model.heatmaps_groundtruth: eval_heatmaps,
@@ -173,14 +173,14 @@ def evalution(sess, model):
                      thresholds_groundtruth: eval_thresholds
                  })
             total += np.count_nonzero(eval_masks, axis=0)
-            hit += np.count_nonzero(is_hit, axis=0)
+            hit += np.count_nonzero(is_hit * eval_masks, axis=0)
             pbar.update(eval_images.shape[0])
 
-    in_percentage = hit / total * 100
-    for joint in JOINT:
-        if joint not in MPII.JOINT_TO_INDEX:
-            continue
-        print("%s: %f%% (%d/%d)" % (joint, in_percentage[joint.value], hit[joint.value], total[joint.value]))
+    logger.info("step(%d), total_acc(%f%%)" % (step, sum(hit) / sum(total) * 100))
+    for joint in np.nonzero(total)[0]:
+        in_percentage = hit[joint] / total[joint] * 100
+        logger.info("%s: %f%% (%d/%d)" % (JOINT(joint).name, in_percentage, hit[joint], total[joint]))
+
 
 
 def main(_):
