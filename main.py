@@ -25,7 +25,7 @@ import tensorflow as tf
 from dotmap import DotMap
 from tqdm import tqdm as tqdm
 
-from datainfo import JOINT, getReader
+from datainfo import JOINT, getReader, MPII, FLIC
 # set logger
 from model import Model
 
@@ -76,7 +76,7 @@ def training(sess, model):
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
             optimizer = tf.train.RMSPropOptimizer(name='optimizer', learning_rate=MODEL.lr).minimize(loss,
-                                                                                               global_step=global_step)
+                                                                                                     global_step=global_step)
 
     summary_merged = tf.summary.merge_all()
     logger.info('created ops for training (loss and optimizer)')
@@ -123,47 +123,64 @@ def training(sess, model):
 
 
 def evalution(sess, model):
+    start_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    logger.info("start evaluation sequence at %s." % start_time)
+
+    global_step = tf.Variable(0, trainable=False, name='global_step')
+
+    poses_groundtruth = tf.placeholder(
+                name='pose_groundtruth',
+                dtype=tf.float32,
+                shape=[None, model.joints, 2])
+    thresholds_groundtruth = tf.placeholder(
+        name='threshold_groundtruth',
+        dtype=tf.float32,
+        shape=[None])
     flat = tf.reshape(model.heatmaps[-1], shape=[-1, 64 * 64, model.joints])
     pose = tf.argmax(flat, axis=-2)
+    pred = tf.stack(values=[pose // 64, pose % 64], axis=-1)
+    dist = tf.norm(tf.cast(pred, tf.float32) - poses_groundtruth, axis=-1)
+    pred_hit = tf.less(dist, thresholds_groundtruth * DATASET.metric.coefficient)
 
-    if DATASET.name == 'FLIC':
-        one_epoch = FLIC.NUMBER_OF_DATA - int(FLIC.NUMBER_OF_DATA * FLIC.TRAIN_RATIO)
-    elif DATASET.name == 'MPII':
-        one_epoch = MPII.NUMBER_OF_DATA - int(MPII.NUMBER_OF_DATA * MPII.TRAIN_RATIO)
+    logger.info('created ops for evaluation.')
 
-    reader = getReader(DATASET.path, DATASET.name)
+    sess.run(tf.global_variables_initializer())
+    logger.info('initialized all variables')
 
-    eval_iter = tqdm(total=one_epoch, desc='ckpt: ')
-    cnt = [0] * len(JOINT)
-    for i in range(one_epoch):
-        eval_images, eval_heatmaps, eval_pose, eval_threshold, eval_mask = reader.__getMiniBatch(8)
-        if eval_images.shape[0] == 0:
-            break
-        pred, result = sess.run([pose, output],
-                                feed_dict={
-                                    model.images: eval_images,
-                                    model.heatmaps_groundtruth: eval_heatmaps,
-                                    model.is_training: False,
-                                    model.mask: eval_mask})
-        eval_iter.update(eval_images.shape[0])
+    saver = tf.train.Saver(max_to_keep=20)
+    if MODEL.pretrained.is_using:
+        list_of_files = glob.glob(os.path.join(MODEL.pretrained.path, '*'))
+        latest_file = max(list_of_files, key=os.path.getctime)
+        file_name = os.path.basename(latest_file).split('.ckpt')[0]
+        saver.restore(sess, os.path.join(MODEL.pretrained.path, '%s.ckpt' % file_name))
+        logger.info('load the pretrained model')
 
-        for batch in range(eval_images.shape[0]):
-            py = pred[batch] // 64
-            px = pred[batch] % 64
-            for joint in JOINT:
-                if joint not in MPII.JOINT_TO_INDEX or eval_mask[batch][joint.value] == False:
-                    continue
-                dist = np.linalg.norm(
-                    np.array([py[joint.value], px[joint.value]])
-                    - np.array(eval_pose[batch][joint.value]))
-                if dist <= eval_threshold[batch] * DATASET.metric.coefficient:
-                    cnt[joint.value] += 1
+    reader = getReader(DATASET.path, DATASET.name, MODEL.batch_size, MODEL.task)
+    logger.info('create dataset reader.')
+
+    tf.train.global_step(sess, global_step)
+    hit = np.zeros(shape=model.joints, dtype=np.float)
+    total = np.zeros(shape=model.joints, dtype=np.float)
+    with tqdm(total=len(reader), unit=' images') as pbar:
+        for eval_images, eval_heatmaps, eval_poses, eval_thresholds, eval_masks in reader:
+            is_hit = sess.run(pred_hit,
+                 feed_dict={
+                     model.images: eval_images,
+                     model.heatmaps_groundtruth: eval_heatmaps,
+                     model.is_training: False,
+                     model.mask: eval_masks,
+                     poses_groundtruth: eval_poses,
+                     thresholds_groundtruth: eval_thresholds
+                 })
+            total += np.count_nonzero(eval_masks, axis=0)
+            hit += np.count_nonzero(is_hit, axis=0)
+            pbar.update(eval_images.shape[0])
+
+    in_percentage = hit / total * 100
     for joint in JOINT:
         if joint not in MPII.JOINT_TO_INDEX:
             continue
-        print(joint, cnt[joint.value] / one_epoch * 100, end='%\n')
-
-    eval_iter.close()
+        print("%s: %f%% (%d/%d)" % (joint, in_percentage[joint.value], hit[joint.value], total[joint.value]))
 
 
 def main(_):
@@ -175,8 +192,7 @@ def main(_):
         if MODEL.task == 'train':
             training(sess, model)
         else:
-            pass
-            # evalution(sess, model)
+            evalution(sess, model)
 
 
 if __name__ == "__main__":
