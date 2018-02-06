@@ -59,8 +59,8 @@ class Model:
                     self.heatmaps.append(heatmap)
                     self.outputs.append(layers.merge(self.images, heatmap))
 
-        net = layers.conv(inputs=net, ksize=1, kchannel=self.features, name='inter') \
-              + layers.conv(inputs=heatmap, ksize=1, kchannel=self.features, name='heatmap') \
-              + prev  # 64 * 64 * 256
+            net = layers.conv(inputs=net, ksize=1, kchannel=self.features, name='inter') \
+                  + layers.conv(inputs=heatmap, ksize=1, kchannel=self.features, name='heatmap') \
+                  + prev  # 64 * 64 * 256
 
         tf.summary.image('result-images', self.outputs[-1])

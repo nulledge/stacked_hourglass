@@ -24,8 +24,9 @@ def gray2color(gray, spectrum=Spectrum.Color):
 
 
 def merge(rgb, heat):
+    rgb *= 255
     heat = tf.image.resize_images(
-        heat,
+        heat * 255,
         [256, 256]
     )
     heat = tf.reduce_max(

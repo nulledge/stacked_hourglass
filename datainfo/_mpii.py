@@ -1,14 +1,16 @@
+import math
 import os
 import random
 from functools import lru_cache
 
+import imageio
 import numpy as np
 import scipy
-from PIL import Image
+import skimage.transform
 from tqdm import tqdm
 
 from ._joint import JOINT
-from .utils import cropRGB, transformImage, transformPosition, generateHeatmap
+from .utils import generateHeatmap
 
 ''' MPII data reader
 
@@ -27,23 +29,23 @@ class MPII:
     TRAIN_RATIO = 0.9
     ROTATE_DEGREE = 30
     SCALE_FACTOR = 0.25
-    JOINT_TO_INDEX = {
-        JOINT.R_Ankle: 0,
-        JOINT.R_Knee: 1,
-        JOINT.R_Hip: 2,
-        JOINT.L_Hip: 3,
-        JOINT.L_Knee: 4,
-        JOINT.L_Ankle: 5,
-        JOINT.M_Pelvis: 6,
-        JOINT.M_Thorax: 7,
-        JOINT.M_UpperNeck: 8,
-        JOINT.M_HeadTop: 9,
-        JOINT.R_Wrist: 10,
-        JOINT.R_Elbow: 11,
-        JOINT.R_Shoulder: 12,
-        JOINT.L_Shoulder: 13,
-        JOINT.L_Elbow: 14,
-        JOINT.L_Wrist: 15
+    ID_TO_JOINT = {
+        0: JOINT.R_Ankle,
+        1: JOINT.R_Knee,
+        2: JOINT.R_Hip,
+        3: JOINT.L_Hip,
+        4: JOINT.L_Knee,
+        5: JOINT.L_Ankle,
+        6: JOINT.M_Pelvis,
+        7: JOINT.M_Thorax,
+        8: JOINT.M_UpperNeck,
+        9: JOINT.M_HeadTop,
+        10: JOINT.R_Wrist,
+        11: JOINT.R_Elbow,
+        12: JOINT.R_Shoulder,
+        13: JOINT.L_Shoulder,
+        14: JOINT.L_Elbow,
+        15: JOINT.L_Wrist
     }
 
     ''' Initialize MPII reader.
@@ -127,16 +129,13 @@ class MPII:
 
         MPII.NUMBER_OF_DATA = len(indices)  # update length because wrong annotation
 
-        def get_rand(pivot, factor):
-            return random.uniform(pivot - factor, pivot + factor)
-
         rotate = 0.0
         scale = 1.0
         with open(self.__imageset_paths['train'], 'w') as train_set:
             for idx in tqdm(indices[0:int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA)]):
-                rand_rot, rand_scale = get_rand(0.0, MPII.ROTATE_DEGREE), get_rand(1.0, MPII.SCALE_FACTOR)
                 train_set.write("%d %d %f %f\n" % (idx[0], idx[1], rotate, scale))
-                train_set.write("%d %d %f %f\n" % (idx[0], idx[1], rand_rot, rand_scale))  # image augmentation
+                # rand_rot, rand_scale = get_rand(0.0, MPII.ROTATE_DEGREE), get_rand(1.0, MPII.SCALE_FACTOR)
+                # train_set.write("%d %d %f %f\n" % (idx[0], idx[1], rand_rot, rand_scale))  # image augmentation
 
         with open(self.__imageset_paths['eval'], 'w') as eval_set:
             for idx in tqdm(indices[int(MPII.TRAIN_RATIO * MPII.NUMBER_OF_DATA):]):
@@ -158,22 +157,32 @@ class MPII:
     '''
 
     def __getMiniBatch(self, imageset_batch):
-
-        # batch_index = self.__loadBatchIndex(size)
+        def rand(x):
+            return max(-2 * x, min(2 * x, random.gauss(0, 1) * x))
 
         batch_rgb = np.ndarray(shape=(len(imageset_batch), 256, 256, 3), dtype=np.float32)
-        batch_heatmap = np.ndarray(shape=(len(imageset_batch), 64, 64, self.joints), dtype=np.float32)
-        batch_masking = np.ndarray(shape=(len(imageset_batch), self.joints), dtype=np.bool)
-        batch_pose = np.ndarray(shape=(len(imageset_batch), self.joints, 2), dtype=np.float32)
-        batch_threshold = []
+        batch_heatmap = np.zeros(shape=(len(imageset_batch), 64, 64, self.joints), dtype=np.float32)
+        batch_keypoint = np.zeros(shape=(len(imageset_batch), self.joints, 2), dtype=np.float32)
+        batch_masking = np.zeros(shape=(len(imageset_batch), self.joints), dtype=np.bool)
+        batch_threshold = np.zeros(shape=(len(imageset_batch), self.joints), dtype=np.float32)
 
         for idx, image_info in enumerate(imageset_batch):
-            batch_rgb[idx][:, :, :] = self.__getRGB(image_info)
-            batch_heatmap[idx][:, :, :], batch_masking[idx][:] = self.__getHeatAndMasking(image_info)
-            batch_pose[idx][:, :] = self.__getPosition(image_info)
-            batch_threshold.append(self.__getThreshold(image_info))
+            img_idx, r_idx, _, _ = image_info
+            annotation = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
 
-        return batch_rgb, batch_heatmap, batch_pose, batch_threshold, batch_masking
+            # scale augmentation
+            scale = annotation['scale'][0, 0] * 1.25
+            scale *= 2 ** rand(MPII.SCALE_FACTOR)
+
+            # rotation augmentation
+            rotate = 0.0
+            if random.random() <= 0.4:
+                rotate = rand(MPII.ROTATE_DEGREE)  # rotate
+
+            batch_rgb[idx], batch_heatmap[idx], batch_keypoint[idx], batch_masking[idx], \
+            batch_threshold[idx] = self.__getRGB(image_info, scale, rotate)
+
+        return batch_rgb, batch_heatmap, batch_keypoint, batch_threshold, batch_masking
 
     ''' Set to read data from initial.
     '''
@@ -216,15 +225,6 @@ class MPII:
         self.__seeker += self.batch_size
         return self.__imageset[prev_seeker:self.__seeker]
 
-    # def __loadBatchIndex(self, size):
-    #     batch_index = []
-    #     for _ in range(size):
-    #         if self.__seeker == len(self.__index):
-    #             break
-    #         batch_index.append(self.__index[self.__seeker])
-    #         self.__seeker += 1
-    #     return batch_index
-
     ''' Get image path.
 
     Arg:
@@ -241,51 +241,6 @@ class MPII:
         image_name = self.__annotation['annolist'][0, 0][0, img_idx]['image'][0, 0]['name'][0]
         return os.path.join(self.__image_path, image_name)
 
-    ''' Calculate padding.
-
-    Arg:
-        index: Data index.
-
-    Returns:
-        Image path, original center, bounding box length, padding size.
-    '''
-
-    @lru_cache(maxsize=32)
-    def __getPadding(self, image_info):
-        img_idx, r_idx, _, _ = image_info
-
-        path = self.__getImagePath(image_info)
-        resolution = dict()
-        resolution['horizontal'], resolution['vertical'] = Image.open(path).size
-
-        center = {
-            'vertical': int(
-                self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['objpos'][0, 0]['y'][0, 0]),
-            'horizontal': int(
-                self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['objpos'][0, 0]['x'][0, 0])
-        }
-        length = int(self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['scale'][0, 0] * 200)
-
-        pad = {
-            'horizontal': {
-                'left': 0, 'right': 0
-            },
-            'vertical': {
-                'up': 0, 'down': 0
-            }
-        }
-
-        if center['vertical'] - length // 2 < 0:
-            pad['vertical']['up'] = length // 2 - center['vertical']
-        if center['vertical'] + length // 2 >= resolution['vertical']:
-            pad['vertical']['down'] = center['vertical'] + length // 2 - resolution['vertical']
-        if center['horizontal'] - length // 2 < 0:
-            pad['horizontal']['left'] = length // 2 - center['horizontal']
-        if center['horizontal'] + length // 2 >= resolution['horizontal']:
-            pad['horizontal']['right'] = center['horizontal'] + length // 2 - resolution['horizontal']
-
-        return center, length, pad, resolution
-
     ''' Get RGB image.
 
     Arg:
@@ -295,133 +250,107 @@ class MPII:
         RGB image of 256*256 px.
     '''
 
-    def __getRGB(self, image_info):
-        center, length, pad, _ = self.__getPadding(image_info)
-        path = self.__getImagePath(image_info)
-        _, _, rotate, scale = image_info
-        image = cropRGB(path, center, length, pad)
-        image = transformImage(image, rotate, scale)
-        return image
-
-    ''' Get Heatmap images.
-
-    Arg:
-        index: Data index.
-
-    Return:
-        Heatmap images of 64*64 px for all joints.
-    '''
-
-    def __getHeatAndMasking(self, image_info):
-        img_idx, r_idx, rotate, scale = image_info
-        maskings = MPII.__getMasking()
-        heatmaps = np.ndarray(shape=(64, 64, self.joints), dtype=np.float32)
-        center, length, pad, resolution = self.__getPadding(image_info)
-
-        keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0][
-            'point']
-
-        for joint in JOINT:
-            heatmaps[:, :, joint.value] = 0
-            if joint not in MPII.JOINT_TO_INDEX:
-                continue
-            n_joint = keypoints_ref.shape[1]
-            for joint_idx in range(n_joint):
-                tag = keypoints_ref[0, joint_idx]['id'][0, 0]
-
-                if MPII.JOINT_TO_INDEX[joint] != tag:
-                    continue
-
-                resize = 64 / length
-                outlier = int(keypoints_ref[0, joint_idx]['y'][0, 0]) not in range(0, resolution['vertical']) \
-                          or int(keypoints_ref[0, joint_idx]['x'][0, 0]) not in range(0, resolution['horizontal'])
-                pose = {
-                    'vertical': (keypoints_ref[0, joint_idx]['y'][0, 0] + length // 2 - center['vertical']) * resize,
-                    'horizontal': (keypoints_ref[0, joint_idx]['x'][0, 0] + length // 2 - center['horizontal']) * resize
-                }
-                outlier = outlier \
-                          or int(pose['vertical']) not in range(0, 64) \
-                          or int(pose['horizontal']) not in range(0, 64)
-                pose, outlier_after_transform = transformPosition(pose, rotate, scale)
-                outlier = outlier or outlier_after_transform
-                if outlier:
-                    maskings[joint.value] = False
-                    continue
-                heatmaps[:, :, joint.value] = generateHeatmap(64, 1, [pose['vertical'], pose['horizontal']])
-
-        return heatmaps, maskings
-
-    ''' Get joint positions.
-
-    Arg:
-        index: Data index.
-
-    Return:
-        Positions for all joints.
-    '''
-
-    def __getPosition(self, image_info):
-        img_idx, r_idx, rotate, scale = image_info
-        positions = np.ndarray(shape=(self.joints, 2))
-        center, length, pad, _ = self.__getPadding(image_info)
-
-        keypoints_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]['annopoints'][0, 0][
-            'point']
-
-        for joint in JOINT:
-            if joint not in MPII.JOINT_TO_INDEX:
-                continue
-            n_joint = keypoints_ref.shape[1]
-            for joint_idx in range(n_joint):
-                tag = keypoints_ref[0, joint_idx]['id'][0, 0]
-
-                if MPII.JOINT_TO_INDEX[joint] != tag:
-                    continue
-
-                resize = 64 / length
-                pose = {
-                    'vertical': (keypoints_ref[0, joint_idx]['y'][0, 0] + length // 2 - center['vertical']) * resize,
-                    'horizontal': (keypoints_ref[0, joint_idx]['x'][0, 0] + length // 2 - center['horizontal']) * resize
-                }
-                pose, _ = transformPosition(pose, rotate, scale)
-
-                positions[joint.value, :] = [pose['vertical'], pose['horizontal']]
-
-        return positions
-
-    ''' Calculate PCKh threshold.
-
-    Arg:
-        index: Data index.
-
-    Return:
-        PCKh threshold
-    '''
-
-    def __getThresholdPCKh(self, image_info):
-        _, length, _, _ = self.__getPadding(image_info)
+    def __getRGB(self, image_info, scale, rotate):
         img_idx, r_idx, _, _ = image_info
-        human_ref = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
+        path = self.__getImagePath(image_info)
+        annotation = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
 
-        return np.linalg.norm(
-            np.array([int(human_ref['y1'][0, 0]), int(human_ref['x1'][0, 0])])
-            - np.array([int(human_ref['y2'][0, 0]), int(human_ref['x2'][0, 0])])) * 64 / length
+        image = imageio.imread(path)
+        HEIGHT, WIDTH, _ = image.shape
 
-    ''' Get threshold of metric.
+        POSITION = annotation['objpos'][0, 0]
+        X_CENTER = int(POSITION['x'][0, 0])
+        Y_CENTER = int(POSITION['y'][0, 0] + 15 * scale)
+        LENGTH = int(scale * 200)
+        HALF_LEN = LENGTH // 2
 
-    Arg:
-        index: Data index.
+        up, down, left, right = 0, 0, 0, 0
+        if WIDTH - X_CENTER >= X_CENTER:
+            left = WIDTH - 2 * X_CENTER
+        else:
+            right = 2 * X_CENTER - WIDTH
 
-    Return:
-        Threshold of metric.
-    '''
+        if HEIGHT - Y_CENTER >= Y_CENTER:
+            up = HEIGHT - 2 * Y_CENTER
+        else:
+            down = 2 * Y_CENTER - HEIGHT
 
-    def __getThreshold(self, image_info):
-        return self.__getThresholdPCKh(image_info)
+        # centered image
+        image = np.pad(image, ((up, down), (left, right), (0, 0)), 'constant', constant_values=(0, 0))
 
-    # if self.__metric == 'PCK':
-    #     return self.__getThresholdPCK(index)
-    # elif self.__metric == 'PCKh':
+        # Bounding box padding
+        height, width, _ = image.shape
+
+        up, down, left, right = 0, 0, 0, 0
+        if width < LENGTH:
+            left = right = (LENGTH - width) // 2 + 1
+        if height < LENGTH:
+            up = down = (LENGTH - height) // 2 + 1
+        image = np.pad(image, ((up, down), (left, right), (0, 0)), 'constant', constant_values=(0, 0))
+
+        height, width, _ = image.shape
+        if height - LENGTH < 0 or width - LENGTH < 0:
+            raise ValueError("tooooo much!")
+
+        # image rotation
+        image = skimage.transform.rotate(image, rotate)
+
+        y_center = image.shape[0] // 2
+        x_center = image.shape[1] // 2
+        image = image[
+                y_center - HALF_LEN: y_center + HALF_LEN,
+                x_center - HALF_LEN: x_center + HALF_LEN, :]
+
+        gt_image = skimage.transform.resize(image, (256, 256))
+        gt_image[:, :, 0] *= random.uniform(0.6, 1.4)
+        gt_image[:, :, 1] *= random.uniform(0.6, 1.4)
+        gt_image[:, :, 2] *= random.uniform(0.6, 1.4)
+        gt_image = np.clip(gt_image, 0, 1)
+
+        ###################################################
+
+        # calculate ground truth heatmaps and positions
+        gt_maskings = MPII.__getMasking()
+        gt_heatmaps = np.zeros(shape=(64, 64, self.joints), dtype=np.float32)
+        gt_keypoints = np.zeros(shape=(self.joints, 2))
+
+        keypoints = annotation['annopoints'][0, 0]['point']
+
+        for idx in range(keypoints.shape[1]):  # num of joint
+            joint_id = keypoints[0, idx]['id'][0, 0]
+
+            if joint_id not in MPII.ID_TO_JOINT:
+                raise ValueError('Wrong joint INDEX! (%d)' % joint_id)
+
+            resize = 64 / LENGTH
+            gt_x, gt_y = (int(keypoints[0, idx]['x'][0, 0]), int(keypoints[0, idx]['y'][0, 0]))
+            outlier = (gt_x < 0 or gt_x >= WIDTH) or (gt_y < 0 or gt_y >= HEIGHT)
+
+            gt_x = (gt_x - (X_CENTER - HALF_LEN)) * resize  # space change: original image >> crop image
+            gt_y = (gt_y - (Y_CENTER - HALF_LEN)) * resize
+
+            x_crop = gt_x - 64 // 2  # space change: crop image >> crop center
+            y_crop = gt_y - 64 // 2
+
+            cos = math.cos(rotate * math.pi / 180)
+            sin = math.sin(rotate * math.pi / 180)
+            y_crop_rot = cos * y_crop - sin * x_crop
+            x_crop_rot = sin * y_crop + cos * x_crop
+
+            gt_x_rot = x_crop_rot + 64 // 2
+            gt_y_rot = y_crop_rot + 64 // 2
+
+            if outlier:
+                gt_maskings[MPII.ID_TO_JOINT[joint_id].value] = False
+                continue
+
+            gt_heatmaps[:, :, MPII.ID_TO_JOINT[joint_id].value] = generateHeatmap(64, gt_y_rot, gt_x_rot, 1)
+            gt_keypoints[MPII.ID_TO_JOINT[joint_id].value, :] = [gt_y_rot, gt_x_rot]
+
+        gt_threshold = np.linalg.norm(
+            np.array([int(annotation['y1'][0, 0]), int(annotation['x1'][0, 0])])
+            - np.array([int(annotation['y2'][0, 0]), int(annotation['x2'][0, 0])])) * 64 / LENGTH
+        return gt_image, gt_heatmaps, gt_keypoints, gt_maskings, gt_threshold
 
     ''' Get mask of MPII.
 
@@ -431,4 +360,7 @@ class MPII:
 
     @staticmethod
     def __getMasking():
-        return [(lambda joint: joint in MPII.JOINT_TO_INDEX)(joint) for joint in JOINT]
+        maskings = [False] * len(JOINT)
+        for _, joint_id in MPII.ID_TO_JOINT.items():
+            maskings[joint_id.value] = True
+        return maskings

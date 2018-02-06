@@ -129,9 +129,9 @@ def evalution(sess, model):
     global_step = tf.Variable(0, trainable=False, name='global_step')
 
     poses_groundtruth = tf.placeholder(
-                name='pose_groundtruth',
-                dtype=tf.float32,
-                shape=[None, model.joints, 2])
+        name='pose_groundtruth',
+        dtype=tf.float32,
+        shape=[None, model.joints, 2])
     thresholds_groundtruth = tf.placeholder(
         name='threshold_groundtruth',
         dtype=tf.float32,
@@ -140,7 +140,8 @@ def evalution(sess, model):
     pose = tf.argmax(flat, axis=-2)
     pred = tf.stack(values=[pose // 64, pose % 64], axis=-1)
     dist = tf.norm(tf.cast(pred, tf.float32) - poses_groundtruth, axis=-1)
-    pred_hit = tf.less(dist, thresholds_groundtruth * DATASET.metric.coefficient)
+    thresholds_gt_exdim = tf.expand_dims(thresholds_groundtruth * DATASET.metric.coefficient, axis=-1)
+    pred_hit = tf.less(dist, thresholds_gt_exdim)
 
     logger.info('created ops for evaluation.')
 
@@ -164,14 +165,14 @@ def evalution(sess, model):
     with tqdm(total=len(reader), unit=' images') as pbar:
         for eval_images, eval_heatmaps, eval_poses, eval_thresholds, eval_masks in reader:
             is_hit, step = sess.run([pred_hit, tf.train.get_global_step()],
-                 feed_dict={
-                     model.images: eval_images,
-                     model.heatmaps_groundtruth: eval_heatmaps,
-                     model.is_training: False,
-                     model.mask: eval_masks,
-                     poses_groundtruth: eval_poses,
-                     thresholds_groundtruth: eval_thresholds
-                 })
+                                    feed_dict={
+                                        model.images: eval_images,
+                                        model.heatmaps_groundtruth: eval_heatmaps,
+                                        model.is_training: False,
+                                        model.mask: eval_masks,
+                                        poses_groundtruth: eval_poses,
+                                        thresholds_groundtruth: eval_thresholds
+                                    })
             total += np.count_nonzero(eval_masks, axis=0)
             hit += np.count_nonzero(is_hit * eval_masks, axis=0)
             pbar.update(eval_images.shape[0])
@@ -180,7 +181,6 @@ def evalution(sess, model):
     for joint in np.nonzero(total)[0]:
         in_percentage = hit[joint] / total[joint] * 100
         logger.info("%s: %f%% (%d/%d)" % (JOINT(joint).name, in_percentage, hit[joint], total[joint]))
-
 
 
 def main(_):

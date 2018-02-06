@@ -132,14 +132,14 @@ Return:
 '''
 
 
-def generateHeatmap(size, sigma=1, center=None):
+def generateHeatmap(size, y0, x0, sigma=1):
     x = np.arange(0, size, 1, np.float32)
     y = x[:, np.newaxis]
 
-    if center is None:
-        x0 = y0 = size // 2
-    else:
-        x0 = center[1]
-        y0 = center[0]
+    # if center is None:
+    #     x0 = y0 = size // 2
+    # else:
+    #     x0 = center[1]
+    #     y0 = center[0]
 
-    return 255 / sigma * np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / 2 * sigma ** 2)
+    return 1 / sigma * np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / 2 * sigma ** 2)
