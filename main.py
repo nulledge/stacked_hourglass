@@ -97,7 +97,7 @@ def training(sess, model):
         saver.restore(sess, os.path.join(MODEL.pretrained.path, '%s.ckpt' % file_name))
         logger.info('load the pretrained model')
 
-    reader = getReader(DATASET.path, DATASET.name, MODEL.batch_size)
+    reader = getReader(DATASET.path, DATASET.name, MODEL.batch_size, MODEL.task)
     logger.info('create dataset reader')
 
     tf.train.global_step(sess, global_step)
@@ -186,7 +186,7 @@ def evalution(sess, model):
 def main(_):
     num_stages = 8
 
-    model = Model(num_stages, 128, len(JOINT))
+    model = Model(num_stages, MODEL.features, len(JOINT))
     with tf.Session() as sess:
 
         if MODEL.task == 'train':
