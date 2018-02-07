@@ -256,52 +256,121 @@ class MPII:
         annotation = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
 
         image = imageio.imread(path)
-        HEIGHT, WIDTH, _ = image.shape
 
         POSITION = annotation['objpos'][0, 0]
-        X_CENTER = int(POSITION['x'][0, 0])
-        Y_CENTER = int(POSITION['y'][0, 0] + 15 * scale)
-        LENGTH = int(scale * 200)
+        OUTPUT_RES = 256
+        LENGTH = int(200 * scale)
         HALF_LEN = LENGTH // 2
 
-        up, down, left, right = 0, 0, 0, 0
-        if WIDTH - X_CENTER >= X_CENTER:
-            left = WIDTH - 2 * X_CENTER
-        else:
-            right = 2 * X_CENTER - WIDTH
 
-        if HEIGHT - Y_CENTER >= Y_CENTER:
-            up = HEIGHT - 2 * Y_CENTER
-        else:
-            down = 2 * Y_CENTER - HEIGHT
+        x_center = POSITION['x'][0, 0]
+        y_center = POSITION['y'][0, 0] + 15.0 * scale
+        X_CENTER = POSITION['x'][0, 0]
+        Y_CENTER = POSITION['y'][0, 0] + 15.0 * scale
 
-        # centered image
-        image = np.pad(image, ((up, down), (left, right), (0, 0)), 'constant', constant_values=(0, 0))
-
-        # Bounding box padding
+        tmp_image = image
         height, width, _ = image.shape
+        HEIGHT, WIDTH, _ = image.shape
 
-        up, down, left, right = 0, 0, 0, 0
-        if width < LENGTH:
-            left = right = (LENGTH - width) // 2 + 1
-        if height < LENGTH:
-            up = down = (LENGTH - height) // 2 + 1
-        image = np.pad(image, ((up, down), (left, right), (0, 0)), 'constant', constant_values=(0, 0))
+        crop_ratio = (200 * scale) / OUTPUT_RES
+        if crop_ratio < 2:
+            crop_ratio = 1
+        else:
+            new_height = math.floor(height / crop_ratio)
+            new_width = math.floor(width / crop_ratio)
 
-        height, width, _ = image.shape
-        if height - LENGTH < 0 or width - LENGTH < 0:
-            raise ValueError("tooooo much!")
+            if max([new_height, new_width]) < 2:
+                raise ValueError("?????????????????????????????")
+            else:
+                tmp_image = skimage.transform.resize(image, (new_height, new_width))
+                height, width = new_height, new_width
 
-        # image rotation
-        image = skimage.transform.rotate(image, rotate)
+        x_center /= crop_ratio
+        y_center /= crop_ratio
+        scale /= crop_ratio
 
-        y_center = image.shape[0] // 2
-        x_center = image.shape[1] // 2
-        image = image[
-                y_center - HALF_LEN: y_center + HALF_LEN,
-                x_center - HALF_LEN: x_center + HALF_LEN, :]
+        x_ul = x_center - 200 * scale / 2
+        y_ul = y_center - 200 * scale / 2
 
-        gt_image = skimage.transform.resize(image, (256, 256))
+        x_br = x_center + 200 * scale / 2
+        y_br = y_center + 200 * scale / 2
+
+        if crop_ratio >= 2:  # force image size 256 x 256
+            x_br -= x_br - x_ul - OUTPUT_RES
+            y_br -= y_br - y_ul - OUTPUT_RES
+
+        pad_length = math.ceil((math.sqrt((x_ul - x_br) ** 2 + (y_ul - y_br) ** 2) - (x_br - x_ul)) / 2)
+
+        if rotate != 0:
+            x_ul -= pad_length
+            y_ul -= pad_length
+            x_br += pad_length
+            y_br += pad_length
+
+        x_ul = int(x_ul)
+        y_ul = int(y_ul)
+        x_br = int(x_br)
+        y_br = int(y_br)
+        width = int(width)
+        height = int(height)
+        pad_length = int(pad_length)
+
+        src = [max(0, y_ul), min(height, y_br), max(0, x_ul), min(width, x_br)]
+        dst = [max(0, -y_ul), min(height, y_br) - y_ul, max(0, -x_ul), min(width, x_br) - x_ul]
+
+        new_image = np.zeros([y_br - y_ul, x_br - x_ul, 3])
+        new_image[dst[0]:dst[1], dst[2]:dst[3], :] = tmp_image[src[0]:src[1], src[2]:src[3], :]
+
+        if rotate != 0:
+            new_image = skimage.transform.rotate(new_image, rotate)
+            new_height, new_width, _ = new_image.shape
+            new_image = new_image[
+                        pad_length:new_height - pad_length,
+                        pad_length:new_width - pad_length,
+                        :]
+
+#        if crop_ratio < 2:
+        new_image = skimage.transform.resize(new_image, (OUTPUT_RES, OUTPUT_RES))
+
+        # up, down, left, right = 0, 0, 0, 0
+        # if WIDTH - X_CENTER >= X_CENTER:
+        #     left = WIDTH - 2 * X_CENTER
+        # else:
+        #     right = 2 * X_CENTER - WIDTH
+        #
+        # if HEIGHT - Y_CENTER >= Y_CENTER:
+        #     up = HEIGHT - 2 * Y_CENTER
+        # else:
+        #     down = 2 * Y_CENTER - HEIGHT
+        #
+        # # centered image
+        # image = np.pad(image, ((up, down), (left, right), (0, 0)), 'constant', constant_values=(0, 0))
+        #
+        # # Bounding box padding
+        # height, width, _ = image.shape
+        #
+        # up, down, left, right = 0, 0, 0, 0
+        # if width < LENGTH:
+        #     left = right = (LENGTH - width) // 2 + 1
+        # if height < LENGTH:
+        #     up = down = (LENGTH - height) // 2 + 1
+        # image = np.pad(image, ((up, down), (left, right), (0, 0)), 'constant', constant_values=(0, 0))
+
+        # height, width, _ = image.shape
+        # if height - LENGTH < 0 or width - LENGTH < 0:
+        #     raise ValueError("tooooo much!")
+        #
+        # # image rotation
+        # image = skimage.transform.rotate(image, rotate)
+        #
+        # y_center = image.shape[0] // 2
+        # x_center = image.shape[1] // 2
+        # image = image[
+        #         y_center - HALF_LEN: y_center + HALF_LEN,
+        #         x_center - HALF_LEN: x_center + HALF_LEN, :]
+        #
+        # gt_image = skimage.transform.resize(image, (256, 256))
+        gt_image = new_image
         gt_image[:, :, 0] *= random.uniform(0.6, 1.4)
         gt_image[:, :, 1] *= random.uniform(0.6, 1.4)
         gt_image[:, :, 2] *= random.uniform(0.6, 1.4)
@@ -344,7 +413,7 @@ class MPII:
                 gt_maskings[MPII.ID_TO_JOINT[joint_id].value] = False
                 continue
 
-            gt_heatmaps[:, :, MPII.ID_TO_JOINT[joint_id].value] = generateHeatmap(64, gt_y_rot, gt_x_rot, 1)
+            gt_heatmaps[:, :, MPII.ID_TO_JOINT[joint_id].value] = generateHeatmap(64, gt_y_rot, gt_x_rot, 1.75)
             gt_keypoints[MPII.ID_TO_JOINT[joint_id].value, :] = [gt_y_rot, gt_x_rot]
 
         gt_threshold = np.linalg.norm(
