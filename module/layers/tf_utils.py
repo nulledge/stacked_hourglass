@@ -37,9 +37,9 @@ def merge(rgb, heat):
         tf.add(
             tf.multiply(
                 gray2color(heat),
-                0.6
+                0.5
             ),
-            tf.multiply(rgb, 0.4)
+            tf.multiply(rgb, 0.5)
         ),
         dtype=tf.uint8
     )

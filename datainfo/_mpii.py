@@ -6,7 +6,7 @@ from functools import lru_cache
 import imageio
 import numpy as np
 import scipy
-import skimage.transform
+import skimage.transform, skimage.io
 from tqdm import tqdm
 
 from ._joint import JOINT
@@ -255,13 +255,13 @@ class MPII:
         path = self.__getImagePath(image_info)
         annotation = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
 
-        image = imageio.imread(path)
+        image = skimage.io.imread(path)
+        image = skimage.img_as_float(image)
 
         POSITION = annotation['objpos'][0, 0]
         OUTPUT_RES = 256
         LENGTH = int(200 * scale)
         HALF_LEN = LENGTH // 2
-
 
         x_center = POSITION['x'][0, 0]
         y_center = POSITION['y'][0, 0] + 15.0 * scale
@@ -289,11 +289,11 @@ class MPII:
         y_center /= crop_ratio
         scale /= crop_ratio
 
-        x_ul = x_center - 200 * scale / 2
-        y_ul = y_center - 200 * scale / 2
+        x_ul = int(x_center - 200 * scale / 2)
+        y_ul = int(y_center - 200 * scale / 2)
 
-        x_br = x_center + 200 * scale / 2
-        y_br = y_center + 200 * scale / 2
+        x_br = int(x_center + 200 * scale / 2)
+        y_br = int(y_center + 200 * scale / 2)
 
         if crop_ratio >= 2:  # force image size 256 x 256
             x_br -= x_br - x_ul - OUTPUT_RES
@@ -318,8 +318,9 @@ class MPII:
         src = [max(0, y_ul), min(height, y_br), max(0, x_ul), min(width, x_br)]
         dst = [max(0, -y_ul), min(height, y_br) - y_ul, max(0, -x_ul), min(width, x_br) - x_ul]
 
-        new_image = np.zeros([y_br - y_ul, x_br - x_ul, 3])
+        new_image = np.zeros([y_br - y_ul, x_br - x_ul, 3], dtype=np.float32)
         new_image[dst[0]:dst[1], dst[2]:dst[3], :] = tmp_image[src[0]:src[1], src[2]:src[3], :]
+
 
         if rotate != 0:
             new_image = skimage.transform.rotate(new_image, rotate)
@@ -329,8 +330,8 @@ class MPII:
                         pad_length:new_width - pad_length,
                         :]
 
-#        if crop_ratio < 2:
-        new_image = skimage.transform.resize(new_image, (OUTPUT_RES, OUTPUT_RES))
+        if crop_ratio < 2:
+            new_image = skimage.transform.resize(new_image, (OUTPUT_RES, OUTPUT_RES))
 
         # up, down, left, right = 0, 0, 0, 0
         # if WIDTH - X_CENTER >= X_CENTER:
@@ -378,6 +379,8 @@ class MPII:
 
         ###################################################
 
+        assert gt_image.shape == (256, 256, 3)
+
         # calculate ground truth heatmaps and positions
         gt_maskings = MPII.__getMasking()
         gt_heatmaps = np.zeros(shape=(64, 64, self.joints), dtype=np.float32)
@@ -409,11 +412,13 @@ class MPII:
             gt_x_rot = x_crop_rot + 64 // 2
             gt_y_rot = y_crop_rot + 64 // 2
 
+            outlier = outlier or (gt_x_rot < 0 or gt_x_rot >= 64) or (gt_y_rot < 0 or gt_y_rot >= 64)
+
             if outlier:
                 gt_maskings[MPII.ID_TO_JOINT[joint_id].value] = False
                 continue
 
-            gt_heatmaps[:, :, MPII.ID_TO_JOINT[joint_id].value] = generateHeatmap(64, gt_y_rot, gt_x_rot, 1.75)
+            gt_heatmaps[:, :, MPII.ID_TO_JOINT[joint_id].value] = generateHeatmap(64, gt_y_rot, gt_x_rot)
             gt_keypoints[MPII.ID_TO_JOINT[joint_id].value, :] = [gt_y_rot, gt_x_rot]
 
         gt_threshold = np.linalg.norm(
@@ -421,11 +426,13 @@ class MPII:
             - np.array([int(annotation['y2'][0, 0]), int(annotation['x2'][0, 0])])) * 64 / LENGTH
         return gt_image, gt_heatmaps, gt_keypoints, gt_maskings, gt_threshold
 
-    ''' Get mask of MPII.
 
+    ''' Get mask of MPII.
+    
     Return:
         Binary list representing mask of MPII.
     '''
+
 
     @staticmethod
     def __getMasking():
