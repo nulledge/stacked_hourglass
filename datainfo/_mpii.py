@@ -356,7 +356,6 @@ class MPII:
 
             resize = 64 / LENGTH
             gt_x, gt_y = (int(keypoints[0, idx]['x'][0, 0]), int(keypoints[0, idx]['y'][0, 0]))
-            outlier = (gt_x < 0 or gt_x >= WIDTH) or (gt_y < 0 or gt_y >= HEIGHT)
 
             gt_x = (gt_x - (X_CENTER - HALF_LEN)) * resize  # space change: original image >> crop image
             gt_y = (gt_y - (Y_CENTER - HALF_LEN)) * resize
@@ -372,7 +371,7 @@ class MPII:
             gt_x_rot = x_crop_rot + 64 // 2
             gt_y_rot = y_crop_rot + 64 // 2
 
-            outlier = outlier or (gt_x_rot < 0 or gt_x_rot >= 64) or (gt_y_rot < 0 or gt_y_rot >= 64)
+            outlier = (gt_x_rot < 0 or gt_x_rot >= 64) or (gt_y_rot < 0 or gt_y_rot >= 64)
 
             if outlier:
                 continue
