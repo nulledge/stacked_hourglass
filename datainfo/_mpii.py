@@ -80,10 +80,6 @@ class MPII:
             print('refresh task set at: %s' % root)
             self.__refreshTaskSet()
 
-        # if not self.__validTaskSet(root, task):
-        #     self.__refreshTaskSet(root)
-        # self.__taskSet = open(os.path.join(root, task + '.txt'), 'r')
-
         self.__seeker = 0
         self.__imageset = []
         with open(self.__imageset_paths[task], 'r') as handle:
@@ -172,12 +168,13 @@ class MPII:
 
             # scale augmentation
             scale = annotation['scale'][0, 0] * 1.25
-            # scale *= 2 ** rand(MPII.SCALE_FACTOR)
+            if self.task == 'train':
+                scale *= 2 ** rand(MPII.SCALE_FACTOR)
 
             # rotation augmentation
             rotate = 0.0
-            # if random.random() <= 0.4:
-            #     rotate = rand(MPII.ROTATE_DEGREE)  # rotate
+            if random.random() <= 0.4 and self.task == 'train':
+                rotate = rand(MPII.ROTATE_DEGREE)  # rotate
 
             batch_rgb[idx], batch_heatmap[idx], batch_keypoint[idx], batch_masking[idx], \
             batch_threshold[idx] = self.__getRGB(image_info, scale, rotate)
@@ -254,6 +251,7 @@ class MPII:
         img_idx, r_idx, _, _ = image_info
         path = self.__getImagePath(image_info)
         annotation = self.__annotation['annolist'][0, 0][0, img_idx]['annorect'][0, r_idx]
+
 
         image = skimage.io.imread(path)
         image = skimage.img_as_float(image)
@@ -333,44 +331,6 @@ class MPII:
         if crop_ratio < 2:
             new_image = skimage.transform.resize(new_image, (OUTPUT_RES, OUTPUT_RES))
 
-        # up, down, left, right = 0, 0, 0, 0
-        # if WIDTH - X_CENTER >= X_CENTER:
-        #     left = WIDTH - 2 * X_CENTER
-        # else:
-        #     right = 2 * X_CENTER - WIDTH
-        #
-        # if HEIGHT - Y_CENTER >= Y_CENTER:
-        #     up = HEIGHT - 2 * Y_CENTER
-        # else:
-        #     down = 2 * Y_CENTER - HEIGHT
-        #
-        # # centered image
-        # image = np.pad(image, ((up, down), (left, right), (0, 0)), 'constant', constant_values=(0, 0))
-        #
-        # # Bounding box padding
-        # height, width, _ = image.shape
-        #
-        # up, down, left, right = 0, 0, 0, 0
-        # if width < LENGTH:
-        #     left = right = (LENGTH - width) // 2 + 1
-        # if height < LENGTH:
-        #     up = down = (LENGTH - height) // 2 + 1
-        # image = np.pad(image, ((up, down), (left, right), (0, 0)), 'constant', constant_values=(0, 0))
-
-        # height, width, _ = image.shape
-        # if height - LENGTH < 0 or width - LENGTH < 0:
-        #     raise ValueError("tooooo much!")
-        #
-        # # image rotation
-        # image = skimage.transform.rotate(image, rotate)
-        #
-        # y_center = image.shape[0] // 2
-        # x_center = image.shape[1] // 2
-        # image = image[
-        #         y_center - HALF_LEN: y_center + HALF_LEN,
-        #         x_center - HALF_LEN: x_center + HALF_LEN, :]
-        #
-        # gt_image = skimage.transform.resize(image, (256, 256))
         gt_image = new_image
         gt_image[:, :, 0] *= random.uniform(0.6, 1.4)
         gt_image[:, :, 1] *= random.uniform(0.6, 1.4)
@@ -415,11 +375,11 @@ class MPII:
             outlier = outlier or (gt_x_rot < 0 or gt_x_rot >= 64) or (gt_y_rot < 0 or gt_y_rot >= 64)
 
             if outlier:
-                gt_maskings[MPII.ID_TO_JOINT[joint_id].value] = False
                 continue
 
             gt_heatmaps[:, :, MPII.ID_TO_JOINT[joint_id].value] = generateHeatmap(64, gt_y_rot, gt_x_rot)
             gt_keypoints[MPII.ID_TO_JOINT[joint_id].value, :] = [gt_y_rot, gt_x_rot]
+            gt_maskings[MPII.ID_TO_JOINT[joint_id].value] = True
 
         gt_threshold = np.linalg.norm(
             np.array([int(annotation['y1'][0, 0]), int(annotation['x1'][0, 0])])
@@ -437,6 +397,4 @@ class MPII:
     @staticmethod
     def __getMasking():
         maskings = [False] * len(JOINT)
-        for _, joint_id in MPII.ID_TO_JOINT.items():
-            maskings[joint_id.value] = True
         return maskings
