@@ -164,7 +164,7 @@ class MPII:
         batch_heatmap = np.zeros(shape=(len(imageset_batch), 64, 64, self.joints), dtype=np.float32)
         batch_keypoint = np.zeros(shape=(len(imageset_batch), self.joints, 2), dtype=np.float32)
         batch_masking = np.zeros(shape=(len(imageset_batch), self.joints), dtype=np.bool)
-        batch_threshold = np.zeros(shape=(len(imageset_batch), self.joints), dtype=np.float32)
+        batch_threshold = np.zeros(shape=(len(imageset_batch)), dtype=np.float32)
 
         for idx, image_info in enumerate(imageset_batch):
             img_idx, r_idx, _, _ = image_info
@@ -172,12 +172,12 @@ class MPII:
 
             # scale augmentation
             scale = annotation['scale'][0, 0] * 1.25
-            scale *= 2 ** rand(MPII.SCALE_FACTOR)
+            # scale *= 2 ** rand(MPII.SCALE_FACTOR)
 
             # rotation augmentation
             rotate = 0.0
-            if random.random() <= 0.4:
-                rotate = rand(MPII.ROTATE_DEGREE)  # rotate
+            # if random.random() <= 0.4:
+            #     rotate = rand(MPII.ROTATE_DEGREE)  # rotate
 
             batch_rgb[idx], batch_heatmap[idx], batch_keypoint[idx], batch_masking[idx], \
             batch_threshold[idx] = self.__getRGB(image_info, scale, rotate)
