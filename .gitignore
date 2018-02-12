@@ -3,3 +3,6 @@
 **/.ipynb_checkpoints/
 .idea/
 src/img/
+ckpt
+ckpt-pre
+dataset-files

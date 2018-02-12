@@ -3,26 +3,26 @@
     "name": "hourglass",
     "lr": 0.00025,
     "features": 256,
-    "batch_size": 8,
-    "task": "train",
+    "batch_size": 1,
+    "task": "eval",
     "epoch": 100,
-    "path": "/home/nulledge/Workspace/ckpt/",
+    "path": "ckpt/",
     "pretrained": {
-      "is_using": false,
-      "path": "/home/nulledge/Workspace/ckpt-pre/"
+      "is_using": true,
+      "path": "ckpt-pre/"
     }
   },
   "tensorboard": {
-    "is_using": true,
-    "path": "/home/nulledge/Workspace/log/"
+    "is_using": false,
+    "path": "log/"
   },
   "dataset": {
-    "name": "MIX",
+    "name": "MPII",
     "name-dummy1": "FLIC",
-    "name-dummy2": "MPII",
-    "path": "/home/nulledge/Datasets/",
+    "name-dummy2": "MIX",
+    "path": "dataset-files/",
     "metric": {
-      "name": "PCK",
+      "name": "PCKh",
       "coefficient": 0.5
     }
   }
